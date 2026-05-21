@@ -4,10 +4,13 @@ Stage 1 of the model-driven context-curation feature. Every tool result is
 given a consecutive, stable ``[bN]`` id at creation time — the handle the model
 uses to address a block for ``archive`` / ``recall``.
 
-The counter is per-session and persisted to disk (``$HERMES_HOME/desk-ids/
-<session>.count``), so ids never collide or reset across a hermes restart.
-Ids are stable for the life of a block; archiving a block leaves a gap, which
-is fine — the curation tool handler validates targets.
+The counter is GLOBAL — one monotonic sequence across every session,
+persisted to ``$HERMES_HOME/desk-ids/_global.count`` — so each block id is
+unique cluster-wide and two sessions never mint the same id. That uniqueness
+lets the archive store be a flat, session-independent keyspace (the engine
+no longer needs the session id to file/recall a block). Ids are stable for
+the life of a block; archiving leaves a gap, which is fine — the curation
+tool handler validates targets.
 """
 from __future__ import annotations
 
@@ -33,9 +36,9 @@ def _counter_dir() -> Path:
     return d
 
 
-def _next_id(session_id: str) -> int:
-    """Return the next consecutive block number for *session_id* (persisted)."""
-    f = _counter_dir() / f"{session_id}.count"
+def _next_id() -> int:
+    """Return the next block number from the global monotonic counter."""
+    f = _counter_dir() / "_global.count"
     with _lock:
         try:
             n = int(f.read_text().strip())
@@ -56,7 +59,7 @@ def _stamp(tool_name: str = "", args=None, result=None,
         return None
     if _STAMPED.match(result):          # already stamped — never double-stamp
         return None
-    return f"[b{_next_id(session_id)}] {result}"
+    return f"[b{_next_id()}] {result}"
 
 
 def register(ctx) -> None:

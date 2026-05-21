@@ -213,7 +213,11 @@ class DeskEngine(ContextEngine):
         return [_ARCHIVE_TOOL, _RECALL_TOOL, _SHRED_TOOL]
 
     def _archive_dir(self) -> Path:
-        d = get_hermes_home() / "desk-archive" / self._session_id
+        # Flat, session-independent store. Block ids are globally unique
+        # (desk-ids stamps from one monotonic counter), so no per-session
+        # subdir is needed — and archive/recall no longer depend on the
+        # engine's session id, which goes stale under interleaved sessions.
+        d = get_hermes_home() / "desk-archive"
         d.mkdir(parents=True, exist_ok=True)
         return d
 
