@@ -106,15 +106,18 @@ the wpu **desk** tidies *context*. They never share a word: **`curator` = skills
 
 The desk is the model's working context. Instead of an opaque summariser, the
 model addresses its own context by block id and **tidies** it — files spent blocks
-away, pulls them back. Four cooperating plugins implement it as numbered stages
-(see each `plugin.yaml`):
+away, pulls them back. Two plugins sharing the top-level `desk_core` module implement
+it (see each `plugin.yaml`):
 
 | Plugin | Hook / type | Role |
 |---|---|---|
-| `plugins/desk-ids/` | `transform_tool_result` | **Stage 1** — stamps a consecutive `[bN]` block id on every tool result; this is the addressable handle the model tidies by. |
-| `plugins/context_engine/desk/` | `ContextEngine` | **Stage 3** — the `desk` engine. Adds the model-driven tidy tools `archive` / `recall` (`shred` at Stage 5); wraps the built-in `ContextCompressor` as a raised-threshold (`0.92`) last-resort fallback. Activate with `context.engine: desk` in `config.yaml`. |
-| `plugins/desk-note/` | `pre_llm_call` | **Stage 4** — injects the escalating "desk-state" note as context fills, prompting the model to tidy. |
-| `plugins/context-trace/` | `pre_api_request` | Diagnostic (not a stage) — detects context-window rollbacks (a request that drops messages/blocks a prior one had) and logs a loud trace to `$HERMES_HOME/context-trace/rollbacks.log`, including process uptime so restart-induced drops are distinguishable. |
+| `plugins/desk/` | `transform_tool_result`, `pre_llm_call`, `post_api_request`, `pre_api_request`, `on_session_reset` | The desk hook-plugin. Stamps a consecutive `[bN]` block id on every tool result; injects the escalating "desk-state" note as context fills, restricting tools to the context-reducing tidy ops (`archive`, `shred`) at the forced level; captures the real-token fill measure; traces context-window rollbacks to `$HERMES_HOME/context-trace/rollbacks.log`. |
+| `plugins/context_engine/desk/` | `ContextEngine` | The `desk` engine. Adds the model-driven tidy tools `archive` / `recall` / `shred`. No synchronous compaction — `should_compress()` is always `False`; `compress()` is a fail-loud guard reached only on API context-overflow. Activate with `context.engine: desk` in `config.yaml`. |
+
+`desk_core` (repo root) is the single source of truth for block-id parsing, watermark/budget
+math, and state paths — both desk plugins import it. Context reduction is model-driven:
+the model tidies its own context via `archive`/`shred`, prompted by the escalating watermark
+note injected by `plugins/desk/`. The LLM-based compressor is no longer used.
 
 `archive` moves a spent block's content to a flat plain-text archive store on the PVC,
 leaving a one-line placeholder; `recall` brings it back verbatim — archiving is
