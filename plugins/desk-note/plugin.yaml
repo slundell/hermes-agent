@@ -1,6 +1,0 @@
-name: desk-note
-version: 0.1.0
-description: "Injects the escalating desk-state note when the context fills, so the model tidies its desk. Stage 4 of the desk feature."
-author: "wpu / desk"
-hooks:
-  - pre_llm_call

@@ -1,6 +1,0 @@
-name: context-trace
-version: 0.1.0
-description: "Detects context-window rollbacks — a request that suddenly drops messages/blocks a prior request had — and logs a loud diagnostic line (stack trace + process uptime, so restart-induced drops are distinguishable)."
-author: "wpu / desk"
-hooks:
-  - pre_api_request
