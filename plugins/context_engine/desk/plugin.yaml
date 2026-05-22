@@ -1,3 +1,3 @@
 name: desk
 version: 0.1.0
-description: "Model-driven context curation. Wraps the built-in compressor (kept as the fallback summariser) and adds the curation tools the model drives itself: archive / recall. Select with context.engine: desk."
+description: "Model-driven desk tidying. Wraps the built-in compressor (kept as the fallback summariser) and adds the tidy tools the model drives itself: archive / recall. Select with context.engine: desk."

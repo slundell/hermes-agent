@@ -2,20 +2,22 @@
 
 A `pre_llm_call` hook. Measures how full the context ("desk") is and, when it
 crosses a threshold, prepends a short descriptive note to the turn so the model
-curates. No percentages face the model — only the descriptive note. Below the
-first threshold there is no note at all: the model just works (restraint).
+tidies its desk. No percentages face the model — only the descriptive note.
+Below the first threshold there is no note at all: the model just works
+(restraint). ("tidy" is the desk verb; not to be confused with Hermes's
+built-in `curator`, which curates skills, not context.)
 
   calm    (< notice)        : no note
   notice  (notice .. urgent): "[desk: filling up — archive a spent block when you can]"
   urgent  (urgent .. forced): "[desk: nearly full — archive a spent block before continuing]"
   forced  (>= forced)       : "[desk: full — archive spent blocks now]" + the tool
                               whitelist is restricted to the context-reducing
-                              curation ops (archive, shred); recall is excluded —
+                              tidy ops (archive, shred); recall is excluded —
                               recalling a block only grows the desk.
 
 Whenever a note fires it carries the actual set of block ids on the desk,
 collapsed into ranges, e.g. "; ids on the desk: b1–b43, b45–b104]". This is
-the F5 fix: the model curates only ids it can see, so it cannot extrapolate a
+the F5 fix: the model tidies only ids it can see, so it cannot extrapolate a
 non-existent id (e.g. `shred b5` when the desk ends at b4).
 
 Thresholds are env-tunable fractions of the effective desk budget
@@ -66,7 +68,7 @@ except Exception:  # pragma: no cover
 DESK_MODEL_MAX_CTX = 262144
 # Fraction of the model window at which the wrapped compressor compacts. Past
 # this point the desk regime is in last-resort territory, so the water-line
-# notes escalate below it to make the model curate first.
+# notes escalate below it to make the model tidy first.
 #
 # DUPLICATED: plugins/context_engine/desk defines DESK_COMPACTION_THRESHOLD
 # under the same name and value (the two desk plugins share no module). Keep
@@ -88,12 +90,12 @@ URGENT = float(os.environ.get("DESK_URGENT_PCT", "0.90"))
 FORCED = float(os.environ.get("DESK_FORCED_PCT", "0.95"))
 HYST = float(os.environ.get("DESK_HYSTERESIS", "0.05"))
 
-# Tools allowed at the `forced` level — only the context-REDUCING curation
-# ops. `archive` (reversible) and `shred` (irreversible) both shrink the desk;
+# Tools allowed at the `forced` level — only the context-REDUCING tidy ops.
+# `archive` (reversible) and `shred` (irreversible) both shrink the desk;
 # `recall` is excluded because it brings an archived block back and *grows*
 # the desk — the opposite of what `forced` needs. `archive` stays the safe
 # default, so the model is never compelled to shred — only permitted to.
-CURATION_ONLY = {"archive", "shred"}
+FORCED_TIDY_TOOLS = {"archive", "shred"}
 _ORDER = ["calm", "notice", "urgent", "forced"]
 _ENTRY = {"calm": 0.0, "notice": NOTICE, "urgent": URGENT, "forced": FORCED}
 NOTES = {
@@ -205,7 +207,7 @@ def _on_post_api_request(usage=None, session_id: str = "", **_):
 def _on_session_reset(session_id: str = "", **_):
     """Drop the cached count on reset. The post-reset context is small but the
     last-seen count is stale-high; without this the first post-reset turn
-    would read as 'forced' and wrongly restrict tools to curation."""
+    would read as 'forced' and wrongly restrict tools to the tidy ops."""
     _LAST_PROMPT_TOKENS.pop(session_id or "default", None)
 
 
@@ -231,19 +233,20 @@ def _on_pre_llm_call(session_id: str = "", conversation_history=None, **_):
     except Exception:
         pass
 
-    # forced level: restrict this turn's tools to curation only; otherwise lift.
+    # forced level: restrict this turn's tools to the tidy ops; otherwise lift.
     if lvl == "forced":
         set_thread_tool_whitelist(
-            CURATION_ONLY,
-            deny_msg_fmt="The desk is full — only curation tools are available "
-                         "until you have made room. Tool '{tool_name}' is held back.")
+            FORCED_TIDY_TOOLS,
+            deny_msg_fmt="The desk is full — only desk-tidy tools (archive, shred) "
+                         "are available until you have made room. Tool "
+                         "'{tool_name}' is held back.")
     else:
         clear_thread_tool_whitelist()
 
     note = NOTES.get(lvl)
     if not note:
         return None
-    # carry the real id set so the model curates only ids it can see (F5).
+    # carry the real id set so the model tidies only ids it can see (F5).
     ids = _desk_block_ids(msgs)
     if ids:
         note = note[:-1] + f"; ids on the desk: {_collapse(ids)}]"

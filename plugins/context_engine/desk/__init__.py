@@ -1,8 +1,13 @@
-"""desk — model-driven context-curation ContextEngine for hermes.
+"""desk — model-driven desk-tidying ContextEngine for hermes.
+
+The desk is the model's working context. The model tidies it — files spent
+blocks away and pulls them back — instead of leaning on opaque compaction.
+("tidy" is the desk verb; Hermes's built-in `curator` is a separate thing —
+it curates skills, not context. Desk = context, curator = skills.)
 
 Wraps the built-in ContextCompressor (kept as the fallback summariser, with a
-raised threshold so it is a genuine last resort) and adds the curation tools
-the model drives itself:
+raised threshold so it is a genuine last resort) and adds the tidy tools the
+model drives itself:
 
   archive(target)  — move a spent block's content to the plain-text archive on
                      the PVC, leaving a one-line placeholder on the desk.
@@ -10,14 +15,14 @@ the model drives itself:
   recall(target)   — bring an archived block's content back onto the desk.
 
 Block ids ([bN]) are stamped on tool results by the `desk-ids` plugin. The
-model decides what to curate; this engine only renders the means and executes
+model decides what to tidy; this engine only renders the means and executes
 the model's calls. Select with `context.engine: desk` in config.yaml.
 
 The wrapped compressor is built lazily in update_model() (which carries the
-model). Curation (archive/recall) works regardless — it only needs the live
+model). Tidying (archive/recall) works regardless — it only needs the live
 message list.
 
-Stage 3 of the context-curation implementation. `shred` is added at Stage 5.
+Stage 3 of the desk implementation. `shred` is added at Stage 5.
 """
 from __future__ import annotations
 
@@ -38,11 +43,11 @@ except Exception:  # pragma: no cover
 
 _BID = re.compile(r"^\s*\[(b\d+)\]")
 _ARCHIVED_MARK = "(archived:"
-CURATION_TOOLS = {"archive", "recall", "shred"}
+TIDY_TOOLS = {"archive", "recall", "shred"}
 # Fraction of the model context window at which the wrapped ContextCompressor
 # compacts. The desk feature raises this above the hermes default (config
 # `compression.threshold`, 0.8) so the compressor stays a genuine last resort
-# — model-driven curation does the normal work.
+# — model-driven tidying does the normal work.
 #
 # DUPLICATED: plugins/desk-note defines DESK_COMPACTION_THRESHOLD under the
 # same name and value (the two desk plugins share no module). Keep the two
@@ -119,7 +124,7 @@ def _content_str(m) -> str:
 
 
 class DeskEngine(ContextEngine):
-    """Curation engine — wraps the compressor (lazy), adds archive/recall."""
+    """Desk engine — wraps the compressor (lazy), adds archive/recall."""
 
     def __init__(self) -> None:
         self._inner = None          # built lazily in update_model()
@@ -216,7 +221,7 @@ class DeskEngine(ContextEngine):
             return self._inner.get_status()
         return super().get_status()
 
-    # -- curation tools -----------------------------------------------------
+    # -- tidy tools ---------------------------------------------------------
     def get_tool_schemas(self):
         return [_ARCHIVE_TOOL, _RECALL_TOOL, _SHRED_TOOL]
 
@@ -239,7 +244,7 @@ class DeskEngine(ContextEngine):
         return None
 
     def handle_tool_call(self, name, args, **kwargs):
-        if name not in CURATION_TOOLS:
+        if name not in TIDY_TOOLS:
             if self._inner is not None:
                 try:
                     return self._inner.handle_tool_call(name, args, **kwargs)
@@ -305,4 +310,4 @@ class DeskEngine(ContextEngine):
                         pass
             return json.dumps({"result": f"shredded {target} — gone for good"})
 
-        return json.dumps({"error": f"unhandled curation tool: {name}"})
+        return json.dumps({"error": f"unhandled tidy tool: {name}"})

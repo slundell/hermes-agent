@@ -1,6 +1,6 @@
 name: desk-ids
 version: 0.1.0
-description: "Stamps a consecutive [bN] block id onto every tool result — the addressable handle the model uses to curate its context (archive/recall). Stage 1 of the model-driven context-curation feature."
-author: "wpu / context-curation"
+description: "Stamps a consecutive [bN] block id onto every tool result — the addressable handle the model uses to tidy its desk (archive/recall). Stage 1 of the desk feature."
+author: "wpu / desk"
 hooks:
   - transform_tool_result

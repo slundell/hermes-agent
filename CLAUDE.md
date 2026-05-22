@@ -91,30 +91,36 @@ All runtime paths are profile-aware: use `get_hermes_home()` from `hermes_consta
 
 ## This checkout (`wpu` branch)
 
-This fork adds context-curation research and tooling not in upstream hermes-agent:
-the `wpu-curation/` directory (drift checks, research, ground-truth batteries) and
-the desk context-curation plugins below. Keep fork-specific work scoped to those areas.
-Note `agent/curator.py` itself is the upstream *skill-lifecycle* curator — a different
-subsystem (see `AGENTS.md` § Curator).
+This fork adds the **desk** — model-driven context tidying — plus research tooling,
+neither in upstream hermes-agent: the `wpu-curation/` directory (drift checks,
+research, ground-truth batteries) and the desk plugins below. Keep fork-specific
+work scoped to those areas.
 
-### Desk context-curation plugins
+**Naming — avoid the collision.** Two distinct subsystems both used to be called
+"curation": Hermes's built-in **`curator`** (`agent/curator.py`) curates *skills*;
+the wpu **desk** tidies *context*. They never share a word: **`curator` = skills,
+`desk` = context, and the desk verb is `tidy`** (not "curate"). `archive` /
+`recall` / `shred` are the desk's tidy ops.
 
-Model-driven context curation: instead of an opaque summariser, the model addresses
-its own context by block id and decides what to set aside. Four cooperating plugins
-implement it as numbered stages (see each `plugin.yaml`):
+### Desk plugins
+
+The desk is the model's working context. Instead of an opaque summariser, the
+model addresses its own context by block id and **tidies** it — files spent blocks
+away, pulls them back. Four cooperating plugins implement it as numbered stages
+(see each `plugin.yaml`):
 
 | Plugin | Hook / type | Role |
 |---|---|---|
-| `plugins/desk-ids/` | `transform_tool_result` | **Stage 1** — stamps a consecutive `[bN]` block id on every tool result; this is the addressable handle the model curates by. |
-| `plugins/context_engine/desk/` | `ContextEngine` | **Stage 3** — the `desk` engine. Adds the model-driven curation tools `archive` / `recall` (`shred` at Stage 5); wraps the built-in `ContextCompressor` as a raised-threshold (`0.92`) last-resort fallback. Activate with `context.engine: desk` in `config.yaml`. |
-| `plugins/desk-note/` | `pre_llm_call` | **Stage 4** — injects the escalating "desk-state" note as context fills, prompting the model to curate. |
+| `plugins/desk-ids/` | `transform_tool_result` | **Stage 1** — stamps a consecutive `[bN]` block id on every tool result; this is the addressable handle the model tidies by. |
+| `plugins/context_engine/desk/` | `ContextEngine` | **Stage 3** — the `desk` engine. Adds the model-driven tidy tools `archive` / `recall` (`shred` at Stage 5); wraps the built-in `ContextCompressor` as a raised-threshold (`0.92`) last-resort fallback. Activate with `context.engine: desk` in `config.yaml`. |
+| `plugins/desk-note/` | `pre_llm_call` | **Stage 4** — injects the escalating "desk-state" note as context fills, prompting the model to tidy. |
 | `plugins/context-trace/` | `pre_api_request` | Diagnostic (not a stage) — detects context-window rollbacks (a request that drops messages/blocks a prior one had) and logs a loud trace to `$HERMES_HOME/context-trace/rollbacks.log`, including process uptime so restart-induced drops are distinguishable. |
 
 `archive` moves a spent block's content to a flat plain-text archive store on the PVC,
 leaving a one-line placeholder; `recall` brings it back verbatim — archiving is
 reversible and never loses anything. Block ids are global/consecutive across the
 session (see commit `83862d9` "global block ids + flat archive store"). The engine
-only renders the means and executes the model's calls — the model decides what to curate.
+only renders the means and executes the model's calls — the model decides what to tidy.
 
 ## Deployment (homelab k3s)
 
@@ -123,7 +129,7 @@ This checkout is not just source — it is the **live deployment**. The agent ru
 restarting the pod ships it.** Treat the `wpu` branch as production.
 
 Deployment artifacts live in a **separate** directory, `/wpu/homelab/k3s/hermes/` (not
-in this repo). The one rule: edit hermes/curation code **only** in `/wpu/src/hermes`
+in this repo). The one rule: edit hermes + desk code **only** in `/wpu/src/hermes`
 (branch `wpu`); never edit a deployed copy — everything the pod runs is a *mount* of
 this checkout.
 
@@ -134,12 +140,12 @@ Inventory of `/wpu/homelab/k3s/hermes/`:
 | `hermes.yaml` | The k8s manifest — namespace `wpu-hermes`, `Deployment/hermes` (1 replica, `Recreate`, pinned to node `master`), PVs/PVCs, SSH `Service`, dashboard `Service` + Tailscale `Ingress`. |
 | `Containerfile` | Image build — Playwright/Ubuntu-24.04 base + supervisor/sshd/Xvfb + deps. Image: `registry.cluster.wpu.nu/hermes-full:v18`. |
 | `build-shell.sh` | `podman build` + push wrapper; carries the full image version log (v1→v18). |
-| `entrypoint-v15.sh` | Pod entrypoint (v15+ mounted-checkout model): host keys, builds the web UI on startup if source changed, hands off to supervisord. (`entrypoint.sh` is the pre-v15 baked-source version, kept for reference.) |
+| `entrypoint.sh` | Pod entrypoint (mounted-checkout model): host keys, pre-builds the `ui-tui` bundle, hands off to supervisord. An `entrypoint-v15.sh` symlink points at it (kept so images baked before the rename still boot). |
 | `supervisord.conf` | Hermes daemons: `hermes-gateway` (messaging) + `hermes-dashboard` (web UI on `:9119`). Image-baked `sshd`/`xvfb`/`signal-cli` come from `conf.d/`. |
 | `conf.d/` | supervisord includes — `signal-cli.conf` (Signal adapter), `sshd.conf`, `xvfb.conf`. |
 | `hermes-exec-guard` | Pre-launch readiness check; hard-fails the pod (crashloop) on missing required env/secrets. |
 | `aina-tools/` | Custom CLI toolkit mounted RO at `/opt/aina-tools`, prepended to `PATH`: `nextcloud`, `sql`, `mop`, `obsidian-cli`, `wikipedia`, `lt`/`ltrs`, and `claude` (transparent shim that SSH-forwards `claude-code` to the `aina` user on master). |
-| `tap/` | `aina-llm-tap` — transparent MITM logging proxy for LLM traffic; the on-the-wire ("A") capture point for the curation R/I/A divergence check. |
+| `tap/` | `aina-llm-tap` — transparent MITM logging proxy for LLM traffic; the on-the-wire ("A") capture point for the desk R/I/A divergence check. |
 | `bin/`, `build-shell.sh`, `sshd_config`, `authorized_keys` | Misc deploy plumbing. SSH keys are edited here on master, not via ConfigMap. |
 | `ISSUES.md` | Running list of issues found from production session reviews. |
 

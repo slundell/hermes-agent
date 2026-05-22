@@ -1,6 +1,6 @@
 """desk-ids — stamp [bN] block ids onto tool results.
 
-Stage 1 of the model-driven context-curation feature. Every tool result is
+Stage 1 of the desk feature (model-driven desk tidying). Every tool result is
 given a consecutive, stable ``[bN]`` id at creation time — the handle the model
 uses to address a block for ``archive`` / ``recall``.
 
@@ -9,8 +9,8 @@ persisted to ``$HERMES_HOME/desk-ids/_global.count`` — so each block id is
 unique cluster-wide and two sessions never mint the same id. That uniqueness
 lets the archive store be a flat, session-independent keyspace (the engine
 no longer needs the session id to file/recall a block). Ids are stable for
-the life of a block; archiving leaves a gap, which is fine — the curation
-tool handler validates targets.
+the life of a block; archiving leaves a gap, which is fine — the desk
+engine's tidy-tool handler validates targets.
 """
 from __future__ import annotations
 
