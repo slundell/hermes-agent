@@ -400,7 +400,15 @@ def _run_review_in_thread(
             # in the request body — Anthropic's cache key includes it.
             # (The runtime whitelist below still restricts dispatch.)
             review_agent = AIAgent(
-                model=agent.model,
+                # wpu interim patch (2026-05-22): route the per-turn skill/
+                # memory review fork off the main model. Upstream wires this
+                # fork to share the parent's prefix cache, but skip_memory=True
+                # drops memory-plugin-contributed tools (holographic's
+                # fact_store/fact_feedback) so tools[] diverges from the parent
+                # → 27B prefix-cache thrash (see ISSUES.md / wpu-curation).
+                # Until that's fixed upstream, send the review to the cheap aux
+                # model. Env-gated — no-op unless HERMES_REVIEW_MODEL is set.
+                model=os.environ.get("HERMES_REVIEW_MODEL") or agent.model,
                 max_iterations=16,
                 quiet_mode=True,
                 platform=agent.platform,
