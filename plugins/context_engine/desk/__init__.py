@@ -39,7 +39,15 @@ except Exception:  # pragma: no cover
 _BID = re.compile(r"^\s*\[(b\d+)\]")
 _ARCHIVED_MARK = "(archived:"
 CURATION_TOOLS = {"archive", "recall", "shred"}
-COMPRESS_THRESHOLD = 0.92  # curation does the normal work; compressor = last resort
+# Fraction of the model context window at which the wrapped ContextCompressor
+# compacts. The desk feature raises this above the hermes default (config
+# `compression.threshold`, 0.8) so the compressor stays a genuine last resort
+# — model-driven curation does the normal work.
+#
+# DUPLICATED: plugins/desk-note defines DESK_COMPACTION_THRESHOLD under the
+# same name and value (the two desk plugins share no module). Keep the two
+# equal. Replace both with a dynamic calc when feasible.
+DESK_COMPACTION_THRESHOLD = 0.92
 
 # Engine tool schemas are returned BARE ({name,description,parameters}) —
 # hermes wraps each as {"type":"function","function": <schema>} itself.
@@ -137,16 +145,16 @@ class DeskEngine(ContextEngine):
         try:
             self._inner = ContextCompressor(
                 model=model,
-                threshold_percent=COMPRESS_THRESHOLD,
+                threshold_percent=DESK_COMPACTION_THRESHOLD,
                 base_url=base_url or "",
                 api_key=api_key or "",
                 provider=provider or "",
                 config_context_length=context_length,
             )
             self._inner.update_model(model, context_length, base_url, api_key, provider)
-            self._inner.threshold_percent = COMPRESS_THRESHOLD
+            self._inner.threshold_percent = DESK_COMPACTION_THRESHOLD
             if context_length:
-                self._inner.threshold_tokens = int(context_length * COMPRESS_THRESHOLD)
+                self._inner.threshold_tokens = int(context_length * DESK_COMPACTION_THRESHOLD)
             # observation/tuning override — pin the compaction trigger directly
             _override = int(os.environ.get("DESK_THRESHOLD_TOKENS", "0") or 0)
             if _override > 0:
