@@ -99,6 +99,9 @@ class DeskEngine(ContextEngine):
 
     def __init__(self) -> None:
         self._session_id = "default"
+        # Read by compress_context() to detect a hard no-op — see compress().
+        self._last_compress_aborted = False
+        self._last_summary_error = None
 
     @property
     def name(self) -> str:
@@ -137,10 +140,18 @@ class DeskEngine(ContextEngine):
         # compatibility and ignored — the desk does not compact synchronously.
         # Reaching compress() means the API rejected the request as too large
         # before any tidy turn could run. The desk cannot reduce context
-        # synchronously — fail loud and return the list unchanged. The caller's
-        # "cannot compress further" path then aborts the turn cleanly.
+        # synchronously — fail loud and return the list unchanged.
         desk_core.log_overflow(
             self._biggest_block(messages), len(messages) if messages else 0)
+        # Signal a hard no-op via the attributes compress_context() checks.
+        # This makes it take the abort short-circuit (clean user warning, NO
+        # session rotation) instead of the normal post-compression session
+        # split. Set on every call — a desk compress() is always an abort;
+        # the desk has no successful-compaction path.
+        self._last_compress_aborted = True
+        self._last_summary_error = (
+            "desk overflow — context cannot be reduced synchronously; "
+            "the model must tidy its desk")
         return messages
 
     @staticmethod

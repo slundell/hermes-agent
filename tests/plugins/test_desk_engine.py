@@ -103,3 +103,13 @@ def test_shred_block_without_paired_tool_call(engine):
     r = json.loads(engine.handle_tool_call("shred", {"target": "b1"}, messages=msgs))
     assert "shredded b1" in r["result"]
     assert msgs == [{"role": "assistant", "content": "just text, no tool calls"}]
+
+
+def test_compress_signals_hard_noop_to_avoid_session_rotation(engine):
+    # compress_context() rotates the session unless the engine flags a hard
+    # no-op via _last_compress_aborted. The desk must set it so an API
+    # overflow aborts the turn WITHOUT forking the session lineage.
+    msgs = [{"role": "user", "content": "hi"}]
+    engine.compress(msgs)
+    assert engine._last_compress_aborted is True
+    assert engine._last_summary_error
