@@ -385,6 +385,16 @@ def _render_message(idx: int, m: dict, *, mutated: bool = False) -> str:
     return f'<details class="{cls}"><summary>{summary}</summary></details>'
 
 
+def _humanise_newlines(s: str) -> str:
+    """Replace every JSON-string newline escape with a real newline so
+    multi-line content (system prompts, file reads, code) is readable when
+    shown verbatim. Both `\\n` (the standard escape) and `\\\\n` (a
+    source-literal backslash-n, which usually originated as a real newline
+    upstream anyway) get rendered as newlines — the display is for human
+    reading, not round-trippable JSON. Tabs the same."""
+    return s.replace("\\n", "\n").replace("\\t", "\t")
+
+
 def _request_body_json(dump_path: str) -> str:
     """Return the request body as prettified JSON. Reads the dump file and
     extracts the `body` payload (what hermes actually sent to the LLM)."""
@@ -394,7 +404,8 @@ def _request_body_json(dump_path: str) -> str:
         return f"(failed to read {dump_path}: {e})"
     body = d.get("request", {}).get("body", d) if isinstance(d, dict) else d
     try:
-        return json.dumps(body, indent=2, ensure_ascii=False, default=str)
+        return _humanise_newlines(
+            json.dumps(body, indent=2, ensure_ascii=False, default=str))
     except Exception as e:
         return f"(failed to render JSON: {e})"
 
@@ -413,8 +424,9 @@ def _response_json(dump_path: str, next_dump: dict | None,
         if resp_path.exists():
             try:
                 d = json.loads(resp_path.read_text(encoding="utf-8"))
-                return (json.dumps(d, indent=2, ensure_ascii=False,
-                                   default=str), False)
+                return (_humanise_newlines(
+                    json.dumps(d, indent=2, ensure_ascii=False,
+                               default=str)), False)
             except Exception as e:
                 return (f"(failed to read response_dump: {e})", False)
     if next_dump is None:
@@ -422,7 +434,8 @@ def _response_json(dump_path: str, next_dump: dict | None,
             "_synthesised": True,
             "_note": "no next iteration yet — this is the latest dump",
         }
-        return (json.dumps(synth, indent=2, ensure_ascii=False), True)
+        return (_humanise_newlines(
+            json.dumps(synth, indent=2, ensure_ascii=False)), True)
     next_msgs = _msgs(next_dump)
     added, _ = _new_msg_indices(cur_msgs, next_msgs)
     synth = {
@@ -432,7 +445,8 @@ def _response_json(dump_path: str, next_dump: dict | None,
                   "the post_api_request hook to write a paired response_dump"),
         "added_messages": [next_msgs[i] for i in added],
     }
-    return (json.dumps(synth, indent=2, ensure_ascii=False, default=str), True)
+    return (_humanise_newlines(
+        json.dumps(synth, indent=2, ensure_ascii=False, default=str)), True)
 
 
 def _render_iteration(turn_idx: int, iter_idx: int, *, prev_msgs: list[dict],
