@@ -1,10 +1,11 @@
 name: desk
-version: 0.2.0
-description: "Model-driven context tidying — the desk hook-plugin. Stamps [bN] block ids on tool results, injects the escalating watermark note (restricting tools to archive/shred at the forced level), captures the real-token fill measure, and traces context-window rollbacks. Pairs with the desk ContextEngine in plugins/context_engine/desk/."
+version: 0.3.0
+description: "Model-driven context tidying — the desk hook-plugin. Stamps [bN] block ids on tool results, injects the escalating watermark note (restricting tools to archive/shred at the forced level), gates shred to urgent+forced bands only (archive stays always-available), captures the real-token fill measure, and traces context-window rollbacks. Pairs with the desk ContextEngine in plugins/context_engine/desk/."
 author: "wpu / desk"
 hooks:
   - transform_tool_result
   - pre_llm_call
   - post_api_request
   - pre_api_request
+  - pre_tool_call
   - on_session_reset

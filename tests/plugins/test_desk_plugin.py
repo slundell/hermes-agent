@@ -105,3 +105,52 @@ def test_session_reset_clears_cached_tokens(desk):
     # chars/4 estimate (calm for an empty history), not a stale 'forced'.
     out = desk._on_pre_llm_call(session_id="s5", conversation_history=[])
     assert out is None
+
+
+def _set_level(tmp_path, sid, lvl):
+    import desk_core
+    (desk_core.state_dir() / f"{sid}.level").write_text(lvl, encoding="utf-8")
+
+
+def test_pre_tool_call_blocks_shred_at_calm(desk, tmp_path):
+    _set_level(tmp_path, "s6", "calm")
+    r = desk._on_pre_tool_call(tool_name="shred", session_id="s6")
+    assert isinstance(r, dict) and r.get("action") == "block"
+    assert "shred is unavailable" in r["message"]
+    assert "calm" in r["message"]
+
+
+def test_pre_tool_call_blocks_shred_at_notice(desk, tmp_path):
+    _set_level(tmp_path, "s7", "notice")
+    r = desk._on_pre_tool_call(tool_name="shred", session_id="s7")
+    assert isinstance(r, dict) and r.get("action") == "block"
+    assert "notice" in r["message"]
+
+
+def test_pre_tool_call_allows_shred_at_urgent(desk, tmp_path):
+    _set_level(tmp_path, "s8", "urgent")
+    assert desk._on_pre_tool_call(tool_name="shred", session_id="s8") is None
+
+
+def test_pre_tool_call_allows_shred_at_forced(desk, tmp_path):
+    _set_level(tmp_path, "s9", "forced")
+    assert desk._on_pre_tool_call(tool_name="shred", session_id="s9") is None
+
+
+def test_pre_tool_call_ignores_non_shred_tools(desk, tmp_path):
+    _set_level(tmp_path, "s10", "calm")
+    assert desk._on_pre_tool_call(tool_name="archive", session_id="s10") is None
+    assert desk._on_pre_tool_call(tool_name="recall", session_id="s10") is None
+    assert desk._on_pre_tool_call(tool_name="read_file", session_id="s10") is None
+
+
+def test_pre_tool_call_defaults_to_calm_when_no_level_file(desk):
+    # fresh session with no level file → treat as calm → shred blocked
+    r = desk._on_pre_tool_call(tool_name="shred", session_id="never-seen")
+    assert isinstance(r, dict) and r.get("action") == "block"
+
+
+def test_register_now_includes_pre_tool_call(desk):
+    ctx = _FakeCtx()
+    desk.register(ctx)
+    assert "pre_tool_call" in ctx.hooks

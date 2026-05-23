@@ -231,9 +231,45 @@ def _on_pre_api_request(session_id="", request_messages=None, **_):
         pass
 
 
+# --- shred gating ---------------------------------------------------------
+# shred is irreversible. At calm and notice the desk is comfortably below
+# its budget — archive (reversible) is enough, and gating shred at those
+# bands prevents the model from defeating recall with an archive-then-shred
+# pattern just to clear placeholder lines. shred remains available at
+# urgent and forced where the extra reduction it offers genuinely matters.
+_SHRED_BANDS = {"urgent", "forced"}
+_SHRED_BLOCK_MSG = (
+    "shred is unavailable at the {lvl} level. Use archive instead — it is "
+    "reversible (the block can be brought back with recall). shred becomes "
+    "available at urgent and forced, where its irreversibility is justified "
+    "by the desk pressure.")
+
+
+def _on_pre_tool_call(tool_name="", args=None, session_id="",
+                      task_id="", tool_call_id="", **_):
+    """pre_tool_call hook — gate `shred` by the current watermark band.
+
+    Returns a {action: block, message} dict to refuse the call; returns None
+    (or anything non-dict) to let it through. The current band is the level
+    `_on_pre_llm_call` wrote to $HERMES_HOME/desk-state/<session>.level just
+    before this turn.
+    """
+    if tool_name != "shred":
+        return None
+    sid = session_id or "default"
+    try:
+        lvl = _level_file(sid).read_text(encoding="utf-8").strip() or "calm"
+    except Exception:
+        lvl = "calm"
+    if lvl in _SHRED_BANDS:
+        return None
+    return {"action": "block", "message": _SHRED_BLOCK_MSG.format(lvl=lvl)}
+
+
 def register(ctx) -> None:
     ctx.register_hook("transform_tool_result", _stamp)
     ctx.register_hook("pre_llm_call", _on_pre_llm_call)
     ctx.register_hook("post_api_request", _on_post_api_request)
     ctx.register_hook("pre_api_request", _on_pre_api_request)
+    ctx.register_hook("pre_tool_call", _on_pre_tool_call)
     ctx.register_hook("on_session_reset", _on_session_reset)
