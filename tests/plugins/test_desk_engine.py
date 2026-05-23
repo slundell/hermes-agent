@@ -59,12 +59,59 @@ def test_compress_is_a_fail_loud_noop(engine, tmp_path):
 
 def test_archive_then_recall_round_trips(engine):
     msgs = [_tool_msg("b1", "the original content")]
-    r = json.loads(engine.handle_tool_call("archive", {"target": "b1"}, messages=msgs))
+    r = json.loads(engine.handle_tool_call(
+        "archive",
+        {"target": "b1", "description": "test content for round-trip"},
+        messages=msgs))
     assert r["result"] == "archived b1"
     assert "(archived:" in msgs[0]["content"]
+    # the description appears in the placeholder so future iterations can
+    # tell what the block was without recalling it for inspection
+    assert "test content for round-trip" in msgs[0]["content"]
     r = json.loads(engine.handle_tool_call("recall", {"target": "b1"}, messages=msgs))
     assert r["result"] == "recalled b1 onto the desk"
     assert msgs[0]["content"] == "[b1] the original content"
+
+
+def test_archive_requires_description(engine):
+    msgs = [_tool_msg("b1", "some content")]
+    # no description → reject before writing the archive file
+    r = json.loads(engine.handle_tool_call(
+        "archive", {"target": "b1"}, messages=msgs))
+    assert "description is required" in r.get("error", "")
+    # empty/whitespace description also rejected
+    r = json.loads(engine.handle_tool_call(
+        "archive", {"target": "b1", "description": "   "}, messages=msgs))
+    assert "description is required" in r.get("error", "")
+    # block was NOT archived (placeholder absent, content untouched)
+    assert "(archived:" not in msgs[0]["content"]
+
+
+def test_archive_placeholder_format(engine):
+    msgs = [_tool_msg("b1", "X" * 2500)]
+    r = json.loads(engine.handle_tool_call(
+        "archive",
+        {"target": "b1", "description": "run_agent.py:1-1000 — orientation"},
+        messages=msgs))
+    assert r["result"] == "archived b1"
+    placeholder = msgs[0]["content"]
+    # format: [b1] (archived: <desc> — <chars> chars off-desk; recall b1 to restore)
+    assert placeholder.startswith("[b1] (archived: run_agent.py:1-1000 — orientation")
+    # the chars count reflects the full original content (incl. [bN] prefix)
+    assert "chars off-desk" in placeholder
+    assert "recall b1 to restore" in placeholder
+
+
+def test_archive_description_is_capped(engine):
+    msgs = [_tool_msg("b1", "content")]
+    long_desc = "x" * 1000
+    r = json.loads(engine.handle_tool_call(
+        "archive", {"target": "b1", "description": long_desc}, messages=msgs))
+    assert r["result"] == "archived b1"
+    # the placeholder caps the description at 150 chars
+    placeholder = msgs[0]["content"]
+    assert "x" * 150 in placeholder
+    assert "x" * 200 not in placeholder
 
 
 def test_shred_removes_block_and_orphan_tool_call(engine):
@@ -114,6 +161,11 @@ def test_tool_descriptions_explain_system_side_overhead(engine):
     assert "system prompt" in arch_desc.lower()
     assert "AGENTS.md" in arch_desc
     assert "tell the user" in arch_desc.lower()
+    # archive must require a description parameter so the placeholder carries
+    # an identity hint (no more recall-as-inspection)
+    arch_params = schemas["archive"]["parameters"]
+    assert "description" in arch_params["properties"]
+    assert "description" in arch_params["required"]
     # shred should mention the band gate
     shred_desc = schemas["shred"]["description"]
     assert "urgent" in shred_desc.lower() and "forced" in shred_desc.lower()

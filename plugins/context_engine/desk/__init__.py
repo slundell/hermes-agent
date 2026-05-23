@@ -40,8 +40,9 @@ _ARCHIVE_TOOL = {
         "Move a spent block off the desk into your archive. The block is kept "
         "whole and safe and can be brought back any time with recall — "
         "archiving never loses anything, it only moves the block aside. A "
-        "one-line placeholder is left in its place. Use on bulky spent "
-        "tool-result blocks. "
+        "one-line placeholder carrying your `description` is left in its "
+        "place, so you (or a future iteration) can see what's archived at a "
+        "glance without recalling it. Use on bulky spent tool-result blocks. "
         "Only [bN]-stamped tool-result blocks are on the desk and can be "
         "archived. System overhead — system prompt, tool schemas, memory, "
         "project context (AGENTS.md, etc.) — is *not* on the desk: it adds "
@@ -56,8 +57,19 @@ _ARCHIVE_TOOL = {
                 "description": "The id of the block to archive — bare (b37) "
                                "or bracketed ([b37]); both accepted.",
             },
+            "description": {
+                "type": "string",
+                "description": (
+                    "REQUIRED. A brief, specific one-line label of what this "
+                    "block contains, e.g. 'run_agent.py:1-1000 — orientation', "
+                    "'terminal: pip install output', or 'search: 17 results for "
+                    "OAuth refresh'. Appears in the placeholder left on the "
+                    "desk — without it future iterations have to recall the "
+                    "block just to see what it was, growing the desk again. "
+                    "Keep it short (<150 chars)."),
+            },
         },
-        "required": ["target"],
+        "required": ["target", "description"],
     },
 }
 _RECALL_TOOL = {
@@ -210,14 +222,26 @@ class DeskEngine(ContextEngine):
         if name == "archive":
             if _ARCHIVED_MARK in content:
                 return json.dumps({"result": f"{target} is already archived"})
+            # description is REQUIRED — the placeholder carries it so future
+            # iterations can see what's archived without recalling. Reject the
+            # call if the model omits it (the model has to think and label).
+            desc = str(args.get("description") or "").strip()
+            if not desc:
+                return json.dumps({"error":
+                    "description is required — a brief one-line label of what "
+                    "this block contains, e.g. 'run_agent.py:1-1000 — "
+                    "orientation'. Without it the placeholder on the desk "
+                    "carries no identity and a later iteration has to recall "
+                    "the block just to see what it was."})
+            desc = desc[:150]  # cap to keep placeholders compact
             try:
                 (desk_core.archive_dir() / f"{target}.txt").write_text(
                     content, encoding="utf-8")
             except Exception as e:
                 return json.dumps({"error": f"archive write failed: {e}"})
             block["content"] = (
-                f"[{target}] {_ARCHIVED_MARK} {len(content)} chars moved off the "
-                f"desk — recall {target} to bring it back)")
+                f"[{target}] {_ARCHIVED_MARK} {desc} — {len(content):,} chars "
+                f"off-desk; recall {target} to restore)")
             return json.dumps({"result": f"archived {target}"})
 
         if name == "recall":
