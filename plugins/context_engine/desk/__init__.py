@@ -41,7 +41,13 @@ _ARCHIVE_TOOL = {
         "whole and safe and can be brought back any time with recall — "
         "archiving never loses anything, it only moves the block aside. A "
         "one-line placeholder is left in its place. Use on bulky spent "
-        "tool-result blocks."),
+        "tool-result blocks. "
+        "Only [bN]-stamped tool-result blocks are on the desk and can be "
+        "archived. System overhead — system prompt, tool schemas, memory, "
+        "project context (AGENTS.md, etc.) — is *not* on the desk: it adds "
+        "to the fill but cannot be archived. When no [bN] blocks remain on "
+        "the desk and the desk is still full, that fill is system-side and "
+        "you should tell the user rather than keep archiving."),
     "parameters": {
         "type": "object",
         "properties": {
@@ -56,7 +62,9 @@ _ARCHIVE_TOOL = {
 }
 _RECALL_TOOL = {
     "name": "recall",
-    "description": "Bring an archived block back onto the desk, verbatim, by its id.",
+    "description": "Bring an archived block back onto the desk, verbatim, by its id. "
+                   "Recall *grows* the desk — only use it when you need the original "
+                   "content again, not to inspect the desk state.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -74,7 +82,8 @@ _SHRED_TOOL = {
         "Destroy a block for good — no archive, no way back. Rare and "
         "irreversible: use only for a block that is plainly worthless (an empty "
         "result, a failed or timed-out command, a search that found nothing). "
-        "If unsure, archive instead."),
+        "If unsure, archive instead. Only available at the urgent and forced "
+        "watermark bands; denied at calm and notice (use archive)."),
     "parameters": {
         "type": "object",
         "properties": {

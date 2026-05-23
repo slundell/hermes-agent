@@ -180,6 +180,12 @@ def _on_pre_llm_call(session_id="", conversation_history=None, **_):
     ids = desk_core.live_block_ids_on_desk(msgs)
     if ids:
         note = note[:-1] + f"; ids on the desk: {desk_core.collapse_ranges(ids)}]"
+    else:
+        # Watermark fired but there is nothing the model can tidy — the fill
+        # is entirely system-side (system prompt, tools, memory, AGENTS.md).
+        # Tell the model so explicitly so it doesn't grasp at non-existent
+        # ids; the user, not the model, has to resolve this.
+        note = note[:-1] + "; no archivable blocks remain — fill is system-side, tell the user]"
     return {"context": note}
 
 

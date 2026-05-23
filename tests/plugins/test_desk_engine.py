@@ -105,6 +105,23 @@ def test_shred_block_without_paired_tool_call(engine):
     assert msgs == [{"role": "assistant", "content": "just text, no tool calls"}]
 
 
+def test_tool_descriptions_explain_system_side_overhead(engine):
+    schemas = {s["name"]: s for s in engine.get_tool_schemas()}
+    # archive should explain that only [bN] blocks are archivable and that
+    # system overhead is not on the desk
+    arch_desc = schemas["archive"]["description"]
+    assert "Only [bN]" in arch_desc
+    assert "system prompt" in arch_desc.lower()
+    assert "AGENTS.md" in arch_desc
+    assert "tell the user" in arch_desc.lower()
+    # shred should mention the band gate
+    shred_desc = schemas["shred"]["description"]
+    assert "urgent" in shred_desc.lower() and "forced" in shred_desc.lower()
+    # recall should warn against using it for inspection
+    rec_desc = schemas["recall"]["description"]
+    assert "grow" in rec_desc.lower()
+
+
 def test_compress_signals_hard_noop_to_avoid_session_rotation(engine):
     # compress_context() rotates the session unless the engine flags a hard
     # no-op via _last_compress_aborted. The desk must set it so an API

@@ -214,6 +214,27 @@ def test_pre_llm_call_uses_calibrated_estimate_for_delta(desk):
     assert "filling up" in out["context"]    # notice-band note
 
 
+def test_note_when_no_live_blocks_says_fill_is_system_side(desk):
+    """When the watermark fires but nothing is archivable, the note must say
+    so explicitly — so the model tells the user instead of grasping at
+    non-existent ids (the v3 confusion observed at forced)."""
+    import desk_core
+    # push to forced; conversation has only placeholders + non-block messages
+    desk._on_post_api_request(
+        usage={"prompt_tokens": int(desk_core.EFFECTIVE_CTX * 1.10)},
+        session_id="empty")
+    msgs = [
+        {"role": "user", "content": "x"},
+        {"role": "tool", "content": "[b20] (archived: 9000 chars moved off the desk — recall b20 to bring it back)"},
+        {"role": "tool", "content": "[b21] (archived: 4500 chars moved off the desk — recall b21 to bring it back)"},
+    ]
+    out = desk._on_pre_llm_call(session_id="empty", conversation_history=msgs)
+    assert out is not None
+    assert "no archivable blocks remain" in out["context"]
+    assert "system-side" in out["context"]
+    assert "tell the user" in out["context"]
+
+
 def test_calibration_cleared_on_session_reset(desk):
     desk._TOK_BASELINE["cal3"] = (50_000, 10_000)
     desk._PENDING_CHARS4["cal3"] = 12_000
