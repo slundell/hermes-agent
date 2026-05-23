@@ -852,3 +852,245 @@ async def test_session_hygiene_default_hard_message_limit_does_not_fire_at_12_me
     assert FakeCompressAgent.last_instance is None, (
         "Compression should NOT fire at 12 messages with default hard_limit=400"
     )
+
+
+def _make_desk_history(live_msgs: int, archived: int) -> list:
+    """Build a history shaped like a desk-enabled session: `live_msgs`
+    ordinary user/assistant turns plus `archived` placeholder tool messages
+    (each carrying the [pN] stamp + (archived: ...) marker that
+    desk_core.live_message_count keys off)."""
+    history = _make_history(live_msgs, content_size=40)
+    for i in range(archived):
+        history.append({
+            "role": "tool",
+            "content": (
+                f"[p{i + 1}] (archived: spent paper #{i + 1} — "
+                f"~1,234 tokens off-desk; recall p{i + 1} to restore)"
+            ),
+            "tool_call_id": f"call_{i}",
+        })
+    return history
+
+
+@pytest.mark.asyncio
+async def test_session_hygiene_hard_limit_ignores_archived_placeholders(
+    monkeypatch, tmp_path
+):
+    """Desk-enabled sessions: archived-placeholder messages don't count
+    toward the hard message-count valve.
+
+    The wpu fork's desk archives spent tool-results in place, leaving
+    ~50-token placeholders so `recall` can restore them. That holds
+    tokens steady while raw `len(history)` keeps climbing. Before this
+    fix the count valve would fire on the raw length even though the
+    desk had kept tokens healthy — triggering an opaque LLM compression
+    on a session that wasn't actually in trouble. The valve now compares
+    against desk_core.live_message_count(history) instead.
+
+    Scenario: 50 live messages + 360 archived placeholders = 410 raw
+    list entries (above the default 400) but only 50 live. Hygiene
+    must NOT fire."""
+    fake_dotenv = types.ModuleType("dotenv")
+    fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
+
+    class FakeCompressAgent:
+        last_instance = None
+
+        def __init__(self, **kwargs):
+            type(self).last_instance = self
+            self.session_id = kwargs.get("session_id", "fake-session")
+            self._print_fn = None
+            self.shutdown_memory_provider = MagicMock()
+            self.close = MagicMock()
+
+        def _compress_context(self, messages, *_args, **_kwargs):
+            return ([{"role": "assistant", "content": "compressed"}], None)
+
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = FakeCompressAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+
+    # No config override — default hard_limit=400.
+    gateway_run = importlib.import_module("gateway.run")
+    GatewayRunner = gateway_run.GatewayRunner
+
+    adapter = HygieneCaptureAdapter()
+    runner = object.__new__(GatewayRunner)
+    runner.config = GatewayConfig(
+        platforms={Platform.TELEGRAM: PlatformConfig(enabled=True, token="fake-token")}
+    )
+    runner.adapters = {Platform.TELEGRAM: adapter}
+    runner._voice_mode = {}
+    runner.hooks = SimpleNamespace(emit=AsyncMock(), loaded_hooks=False)
+    runner.session_store = MagicMock()
+    runner.session_store.get_or_create_session.return_value = SessionEntry(
+        session_key="agent:main:telegram:private:12345",
+        session_id="sess-1",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        platform=Platform.TELEGRAM,
+        chat_type="private",
+    )
+    history = _make_desk_history(live_msgs=50, archived=360)
+    assert len(history) == 410, "scenario expects raw count above 400 hard limit"
+    runner.session_store.load_transcript.return_value = history
+    runner.session_store.has_any_sessions.return_value = True
+    runner.session_store.rewrite_transcript = MagicMock()
+    runner.session_store.append_to_transcript = MagicMock()
+    runner._running_agents = {}
+    runner._pending_messages = {}
+    runner._pending_approvals = {}
+    runner._session_db = None
+    runner._is_user_authorized = lambda _source: True
+    runner._set_session_env = lambda _context: None
+    runner._run_agent = AsyncMock(
+        return_value={
+            "final_response": "ok",
+            "messages": [],
+            "tools": [],
+            "history_offset": 0,
+            "last_prompt_tokens": 0,
+        }
+    )
+
+    monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
+    monkeypatch.setattr(
+        gateway_run, "_resolve_runtime_agent_kwargs", lambda: {"api_key": "fake"}
+    )
+    # Big context so the token-based threshold doesn't fire either —
+    # the only path to compression in this test would be the count valve.
+    monkeypatch.setattr(
+        "agent.model_metadata.get_model_context_length",
+        lambda *_args, **_kwargs: 1_000_000,
+    )
+
+    event = MessageEvent(
+        text="hello",
+        source=SessionSource(
+            platform=Platform.TELEGRAM,
+            chat_id="12345",
+            chat_type="private",
+            user_id="12345",
+        ),
+        message_id="1",
+    )
+
+    result = await runner._handle_message(event)
+
+    assert result == "ok"
+    # No compression: live_message_count = 50, well below 400.
+    assert FakeCompressAgent.last_instance is None, (
+        "Hygiene fired on raw len(history)=410 instead of live=50 — "
+        "the desk-archive placeholders are still being counted against "
+        "the hard message-count valve."
+    )
+
+
+@pytest.mark.asyncio
+async def test_session_hygiene_hard_limit_counts_live_messages_when_exceeded(
+    monkeypatch, tmp_path
+):
+    """Companion to the test above: when LIVE messages cross the limit,
+    hygiene must still fire — even if archives keep raw len(history)
+    only slightly above. Guards against the obvious over-correction of
+    suppressing the valve entirely."""
+    fake_dotenv = types.ModuleType("dotenv")
+    fake_dotenv.load_dotenv = lambda *args, **kwargs: None
+    monkeypatch.setitem(sys.modules, "dotenv", fake_dotenv)
+
+    class FakeCompressAgent:
+        last_instance = None
+
+        def __init__(self, **kwargs):
+            type(self).last_instance = self
+            self.session_id = kwargs.get("session_id", "fake-session")
+            self._print_fn = None
+            self.shutdown_memory_provider = MagicMock()
+            self.close = MagicMock()
+
+        def _compress_context(self, messages, *_args, **_kwargs):
+            return ([{"role": "assistant", "content": "compressed"}], None)
+
+    fake_run_agent = types.ModuleType("run_agent")
+    fake_run_agent.AIAgent = FakeCompressAgent
+    monkeypatch.setitem(sys.modules, "run_agent", fake_run_agent)
+
+    cfg_path = tmp_path / "config.yaml"
+    cfg_path.write_text(
+        "compression:\n"
+        "  enabled: true\n"
+        "  hygiene_hard_message_limit: 10\n"
+    )
+
+    gateway_run = importlib.import_module("gateway.run")
+    GatewayRunner = gateway_run.GatewayRunner
+
+    adapter = HygieneCaptureAdapter()
+    runner = object.__new__(GatewayRunner)
+    runner.config = GatewayConfig(
+        platforms={Platform.TELEGRAM: PlatformConfig(enabled=True, token="fake-token")}
+    )
+    runner.adapters = {Platform.TELEGRAM: adapter}
+    runner._voice_mode = {}
+    runner.hooks = SimpleNamespace(emit=AsyncMock(), loaded_hooks=False)
+    runner.session_store = MagicMock()
+    runner.session_store.get_or_create_session.return_value = SessionEntry(
+        session_key="agent:main:telegram:private:12345",
+        session_id="sess-1",
+        created_at=datetime.now(),
+        updated_at=datetime.now(),
+        platform=Platform.TELEGRAM,
+        chat_type="private",
+    )
+    # 12 live + 5 archived placeholders = 17 raw, but live=12 — both above
+    # the lowered limit of 10. Hygiene MUST fire on the live count.
+    runner.session_store.load_transcript.return_value = _make_desk_history(
+        live_msgs=12, archived=5
+    )
+    runner.session_store.has_any_sessions.return_value = True
+    runner.session_store.rewrite_transcript = MagicMock()
+    runner.session_store.append_to_transcript = MagicMock()
+    runner._running_agents = {}
+    runner._pending_messages = {}
+    runner._pending_approvals = {}
+    runner._session_db = None
+    runner._is_user_authorized = lambda _source: True
+    runner._set_session_env = lambda _context: None
+    runner._run_agent = AsyncMock(
+        return_value={
+            "final_response": "ok",
+            "messages": [],
+            "tools": [],
+            "history_offset": 0,
+            "last_prompt_tokens": 0,
+        }
+    )
+
+    monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
+    monkeypatch.setattr(
+        gateway_run, "_resolve_runtime_agent_kwargs", lambda: {"api_key": "fake"}
+    )
+    monkeypatch.setattr(
+        "agent.model_metadata.get_model_context_length",
+        lambda *_args, **_kwargs: 1_000_000,
+    )
+
+    event = MessageEvent(
+        text="hello",
+        source=SessionSource(
+            platform=Platform.TELEGRAM,
+            chat_id="12345",
+            chat_type="private",
+            user_id="12345",
+        ),
+        message_id="1",
+    )
+
+    result = await runner._handle_message(event)
+
+    assert result == "ok"
+    assert FakeCompressAgent.last_instance is not None, (
+        "Hygiene should fire when LIVE message count (12) exceeds the "
+        "configured limit (10), even with archive placeholders present."
+    )

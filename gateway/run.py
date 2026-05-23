@@ -8440,6 +8440,23 @@ class GatewayRunner:
 
                 _msg_count = len(history)
 
+                # The hard message-count valve fires on *logical* messages —
+                # archived-placeholder messages don't count.  This matters for
+                # desk-enabled sessions (wpu fork): the desk archives spent
+                # tool-results in place, leaving ~50-token placeholders so
+                # `recall` can restore them.  That holds tokens steady while
+                # raw list length keeps climbing — exactly the shape that
+                # triggers the count valve even though the desk has kept
+                # everything tidy.  Use desk_core.live_message_count() if it's
+                # importable (always is on the wpu fork); fall back to raw
+                # len() on upstream Hermes / non-desk installs.
+                _live_msg_count = _msg_count
+                try:
+                    import desk_core
+                    _live_msg_count = desk_core.live_message_count(history)
+                except Exception:
+                    pass
+
                 # Prefer actual API-reported tokens from the last turn
                 # (stored in session entry) over the rough char-based estimate.
                 _stored_tokens = session_entry.last_prompt_tokens
@@ -8469,14 +8486,21 @@ class GatewayRunner:
                 _HARD_MSG_LIMIT = _hyg_hard_msg_limit
                 _needs_compress = (
                     _approx_tokens >= _compress_token_threshold
-                    or _msg_count >= _HARD_MSG_LIMIT
+                    or _live_msg_count >= _HARD_MSG_LIMIT
                 )
 
                 if _needs_compress:
+                    # Log raw vs live count when they differ — surfaces how
+                    # much the desk has trimmed and explains why the count
+                    # valve fired (or didn't) at a glance.
+                    _msg_label = (
+                        f"{_msg_count:,}" if _live_msg_count == _msg_count
+                        else f"{_msg_count:,} ({_live_msg_count:,} live)"
+                    )
                     logger.info(
                         "Session hygiene: %s messages, ~%s tokens (%s) — auto-compressing "
                         "(threshold: %s%% of %s = %s tokens)",
-                        _msg_count, f"{_approx_tokens:,}", _token_source,
+                        _msg_label, f"{_approx_tokens:,}", _token_source,
                         int(_hyg_threshold_pct * 100),
                         f"{_hyg_context_length:,}",
                         f"{_compress_token_threshold:,}",

@@ -98,6 +98,35 @@ def live_paper_ids_on_desk(messages) -> "list[int]":
     return sorted(set(ids))
 
 
+def live_message_count(messages) -> int:
+    """Logical message count — total list length minus archived placeholders.
+
+    Archived papers stay in the message stream as one-line placeholders so
+    `recall` can find them, but they cost only ~50 tokens each. Callers that
+    gate on history length (e.g. the gateway's hard message-count safety
+    valve) should compare against the *logical* conversation count, not raw
+    `len(history)`. Otherwise the desk's success at trimming tokens triggers
+    opaque LLM compression: list entries accumulate while tokens stay low,
+    crossing a count-based threshold that was meant for sessions where
+    tokens were unknown and messages were exploding.
+
+    A message is treated as an archived placeholder iff it's a `role="tool"`
+    message stamped with a `[pN]` id AND its content carries the
+    `(archived:` marker written by the desk engine's archive op. Other
+    occurrences of the marker (prose mentioning it, user text, etc.) are
+    not stripped — placeholder detection requires both signals."""
+    if not messages:
+        return 0
+    archived = 0
+    for m in messages:
+        if not isinstance(m, dict) or m.get("role") != "tool":
+            continue
+        c = content_str(m)
+        if paper_id(c) and "(archived:" in c:
+            archived += 1
+    return len(messages) - archived
+
+
 def collapse_ranges(nums) -> str:
     """Render a sorted id list as compact ranges: [1,2,3,5,6] -> 'b1–b3, b5, b6'."""
     runs: "list[list[int]]" = []

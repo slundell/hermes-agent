@@ -189,3 +189,37 @@ def test_next_block_id_returns_value_even_if_persist_fails(dc, monkeypatch):
         lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
     # the incremented value is still returned (in-memory), write failure is logged
     assert dc.next_paper_id() == first + 1
+
+
+def test_live_message_count_subtracts_archived_placeholders(dc):
+    # Archived papers stay in the message list as one-line placeholders so
+    # `recall` can find them, but they cost ~50 tokens each. Callers that
+    # gate on history length (e.g. gateway hygiene's hard message limit)
+    # should see the *logical* conversation count, not raw list length —
+    # otherwise the desk's success at trimming tokens triggers an opaque
+    # LLM compression because list entries accumulate while tokens stay low.
+    msgs = [
+        {"role": "system", "content": "be helpful"},
+        {"role": "user", "content": "hi"},
+        {"role": "assistant", "content": "hello"},
+        {"role": "tool", "content": "[p1] live tool result"},
+        {"role": "tool", "content": "[p2] (archived: foo — ~1,234 tokens off-desk; recall p2 to restore)"},
+        {"role": "tool", "content": "[p3] another live result"},
+        {"role": "tool", "content": "[p4] (archived: bar — ~99 tokens off-desk; recall p4 to restore)"},
+    ]
+    # raw length is 7; two archived placeholders → 5 live messages
+    assert len(msgs) == 7
+    assert dc.live_message_count(msgs) == 5
+
+
+def test_live_message_count_handles_empty_and_non_archive(dc):
+    assert dc.live_message_count([]) == 0
+    assert dc.live_message_count(None) == 0
+    # tool message with the archive marker but no [pN] id is NOT one of ours —
+    # be conservative and count it as live (don't false-positive on prose).
+    msgs = [
+        {"role": "tool", "content": "user said (archived: not a real placeholder)"},
+        {"role": "assistant", "content": "(archived: just text)"},
+        {"role": "user", "content": "(archived: still just text)"},
+    ]
+    assert dc.live_message_count(msgs) == 3
