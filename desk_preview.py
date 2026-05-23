@@ -386,26 +386,12 @@ def _render_message(idx: int, m: dict, *, mutated: bool = False) -> str:
 
 
 def _humanise_newlines(s: str) -> str:
-    """Make verbatim JSON readable. Sacrifices round-trippability for
-    legibility — these boxes are for reading prompts, not re-parsing.
-
-    Cheats applied in order:
-      1. \\n / \\t  → real newline / tab        (multi-line content)
-      2. \\"        → "                          (internal-quote escapes)
-      3. \\\\       → \\                         (collapse double backslashes)
-
-    Reads cleanly through nested-escape disasters like
-    `{"content": "{\\\"key\\\": \\\"value\\\\nmore\\\"}"}` — those are
-    common when tool results return JSON-stringified payloads that the
-    outer message-body wrapper escapes a second time. After this pass
-    you see:
-      {"content": "{"key": "value
-      more"}"}
-    """
-    s = s.replace("\\n", "\n").replace("\\t", "\t")
-    s = s.replace('\\"', '"')
-    s = s.replace("\\\\", "\\")
-    return s
+    """Render JSON multi-line content readably. The JSON itself stays
+    valid-shaped — only the `\\n` / `\\t` escapes inside string values are
+    rendered as real characters so prose/code/markdown content wraps
+    naturally. Quote and backslash escapes are kept as-is so the surrounding
+    JSON structure remains recognisable."""
+    return s.replace("\\n", "\n").replace("\\t", "\t")
 
 
 def _request_body_json(dump_path: str) -> str:
