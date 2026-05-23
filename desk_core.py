@@ -179,8 +179,8 @@ URGENT_PCT = float(os.environ.get("DESK_URGENT_PCT", "0.90"))
 FORCED_PCT = float(os.environ.get("DESK_FORCED_PCT", "1.00"))
 HYSTERESIS = float(os.environ.get("DESK_HYSTERESIS", "0.05"))
 
-LEVELS = ["calm", "notice", "urgent", "forced"]
-_ENTRY = {"calm": 0.0, "notice": NOTICE_PCT, "urgent": URGENT_PCT, "forced": FORCED_PCT}
+LEVELS = ["clean", "notice", "urgent", "forced"]
+_ENTRY = {"clean": 0.0, "notice": NOTICE_PCT, "urgent": URGENT_PCT, "forced": FORCED_PCT}
 
 # Descriptive notes — no percentages ever face the model. Each note opens
 # with the band name so the model has a positive signal of which band it's
@@ -189,14 +189,14 @@ _ENTRY = {"calm": 0.0, "notice": NOTICE_PCT, "urgent": URGENT_PCT, "forced": FOR
 # already AT forced — see v6 drive observation). Each band also names the
 # tidy tools currently available to it.
 #
-# Calm gets a short note too (was None), to fix a turn/tool-call sync issue
+# Clean gets a short note too (was None), to fix a turn/tool-call sync issue
 # seen in v7: within a multi-iteration turn the band can drop (e.g.
-# forced → calm after archives), but if calm emits no note the model still
+# forced → clean after archives), but if clean emits no note the model still
 # sees the old forced note in history and acts on it (e.g. tries to shred).
 # Always emitting the current band's note gives every iteration's prompt a
 # fresh, current state signal — no stale-memory mismatches with the gate.
 NOTES = {
-    "calm": "[desk: calm]",
+    "clean": "[desk: clean]",
     "notice": "[desk: notice — filling up; archive a spent block when you can. shred is unavailable below urgent.]",
     "urgent": "[desk: urgent — nearly full; archive a spent block before continuing. shred is now available.]",
     "forced": "[desk: forced — full; archive or shred spent blocks now (only archive and shred are usable until you make room).]",
@@ -211,7 +211,7 @@ def fill_fraction(tokens: float) -> float:
     return tokens / EFFECTIVE_CTX
 
 
-def level_for(frac: float, prev: str = "calm") -> str:
+def level_for(frac: float, prev: str = "clean") -> str:
     """Watermark band for a fill fraction, with hysteresis on band-exit."""
     if frac >= FORCED_PCT:
         lvl = "forced"
@@ -220,7 +220,7 @@ def level_for(frac: float, prev: str = "calm") -> str:
     elif frac >= NOTICE_PCT:
         lvl = "notice"
     else:
-        lvl = "calm"
+        lvl = "clean"
     # hysteresis: don't drop below the previous band until frac falls a margin
     # below that band's entry point
     if prev in LEVELS and LEVELS.index(lvl) < LEVELS.index(prev):

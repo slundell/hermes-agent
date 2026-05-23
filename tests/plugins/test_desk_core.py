@@ -74,7 +74,7 @@ def test_effective_ctx_is_window_minus_headroom(dc):
 
 def test_level_for_bands(dc):
     # fractions of EFFECTIVE_CTX: notice 0.80, urgent 0.90, forced 1.00
-    assert dc.level_for(0.50) == "calm"
+    assert dc.level_for(0.50) == "clean"
     assert dc.level_for(0.85) == "notice"
     assert dc.level_for(0.95) == "urgent"
     assert dc.level_for(1.05) == "forced"
@@ -89,21 +89,21 @@ def test_level_for_hysteresis_holds_band_on_exit(dc):
 
 def test_notes_open_with_band_name(dc):
     """Every note must open with the band's literal name so the model has a
-    positive signal of which band it's in. Calm gets a (short) note now too —
+    positive signal of which band it's in. Clean gets a (short) note now too —
     v7 drive showed Aina acting on a stale 'forced' note in history after the
-    band had dropped to calm; emitting a calm note every iteration keeps the
+    band had dropped to clean; emitting a clean note every iteration keeps the
     most recent prompt state-current."""
-    assert dc.NOTES["calm"] is not None
-    assert "calm" in dc.NOTES["calm"].lower()
+    assert dc.NOTES["clean"] is not None
+    assert "clean" in dc.NOTES["clean"].lower()
     assert "notice" in dc.NOTES["notice"].lower()
     assert "urgent" in dc.NOTES["urgent"].lower()
     assert "forced" in dc.NOTES["forced"].lower()
-    # each non-calm band's note should also mention shred's availability
+    # each non-clean band's note should also mention shred's availability
     assert "shred" in dc.NOTES["notice"].lower()
     assert "shred" in dc.NOTES["urgent"].lower()
     assert "shred" in dc.NOTES["forced"].lower()
-    # calm note stays short — no per-turn token waste
-    assert len(dc.NOTES["calm"]) <= 30
+    # clean note stays short — no per-turn token waste
+    assert len(dc.NOTES["clean"]) <= 30
 
 
 def test_token_count_fallback_when_no_url(dc, monkeypatch):

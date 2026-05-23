@@ -153,7 +153,7 @@ def _on_pre_llm_call(session_id="", conversation_history=None, **_):
     try:
         prev = lf.read_text(encoding="utf-8").strip()
     except Exception:
-        prev = "calm"
+        prev = "clean"
     lvl = desk_core.level_for(frac, prev)
     try:
         lf.write_text(lvl, encoding="utf-8")
@@ -173,13 +173,13 @@ def _on_pre_llm_call(session_id="", conversation_history=None, **_):
     note = desk_core.NOTES.get(lvl)
     if not note:
         return None
-    # Calm gets a short note as-is — no id listing needed (desk is fine).
-    # Non-calm gets a LIVE id appendix so the model can pick targets;
+    # Clean gets a short note as-is — no id listing needed (desk is fine).
+    # Non-clean gets a LIVE id appendix so the model can pick targets;
     # archived placeholders stay in the message stream as recall handles but
     # don't appear in the note (so the model doesn't misread them as
     # "occupied slots"). If no live ids remain and the desk is still hot,
     # tell the model the fill is system-side rather than letting it grasp.
-    if lvl == "calm":
+    if lvl == "clean":
         return {"context": note}
     ids = desk_core.live_block_ids_on_desk(msgs)
     if ids:
@@ -275,7 +275,7 @@ def _on_pre_api_request(session_id="", request_messages=None, **_):
 
 
 # --- shred gating ---------------------------------------------------------
-# shred is irreversible. At calm and notice the desk is comfortably below
+# shred is irreversible. At clean and notice the desk is comfortably below
 # its budget — archive (reversible) is enough, and gating shred at those
 # bands prevents the model from defeating recall with an archive-then-shred
 # pattern just to clear placeholder lines. shred remains available at
@@ -303,9 +303,9 @@ def _on_pre_tool_call(tool_name="", args=None, session_id="",
         return None
     sid = session_id or "default"
     try:
-        lvl = _level_file(sid).read_text(encoding="utf-8").strip() or "calm"
+        lvl = _level_file(sid).read_text(encoding="utf-8").strip() or "clean"
     except Exception:
-        lvl = "calm"
+        lvl = "clean"
     if lvl in _SHRED_BANDS:
         return None
     return {"action": "block", "message": _SHRED_BLOCK_MSG.format(lvl=lvl)}

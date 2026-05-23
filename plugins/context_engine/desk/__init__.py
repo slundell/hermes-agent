@@ -95,7 +95,7 @@ _SHRED_TOOL = {
         "irreversible: use only for a block that is plainly worthless (an empty "
         "result, a failed or timed-out command, a search that found nothing). "
         "If unsure, archive instead. Only available at the urgent and forced "
-        "watermark bands; denied at calm and notice (use archive)."),
+        "watermark bands; denied at clean and notice (use archive)."),
     "parameters": {
         "type": "object",
         "properties": {

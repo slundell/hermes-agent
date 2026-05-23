@@ -54,7 +54,7 @@ def _band(toks: int) -> str:
         return "urgent"
     if toks >= int(EFFECTIVE_CTX * NOTICE_PCT):
         return "notice"
-    return "calm"
+    return "clean"
 
 
 # --- helpers --------------------------------------------------------------
@@ -196,14 +196,14 @@ _CSS = """
   --ink: #222; --muted: #888; --rule: #e6e6e6;
   --bg: #fafafa; --card: #fff;
   --t-system: #c97a00; --t-user: #1e6fc9; --t-agent: #189a3e; --t-tool: #a040b8;
-  --b-calm: #2e8b57; --b-notice: #b8860b; --b-urgent: #c75a00; --b-forced: #c83838;
+  --b-clean: #2e8b57; --b-notice: #b8860b; --b-urgent: #c75a00; --b-forced: #c83838;
 }
 @media (prefers-color-scheme: dark) {
   :root {
     --ink: #ddd; --muted: #8a8a8a; --rule: #333;
     --bg: #1a1a1a; --card: #222;
     --t-system: #f0a040; --t-user: #5aa9ff; --t-agent: #4cce6a; --t-tool: #c885d6;
-    --b-calm: #4caf50; --b-notice: #d0a020; --b-urgent: #e89030; --b-forced: #e85050;
+    --b-clean: #4caf50; --b-notice: #d0a020; --b-urgent: #e89030; --b-forced: #e85050;
   }
 }
 * { box-sizing: border-box; }
@@ -280,7 +280,7 @@ details.msg > summary { font-size: .88rem; }
 .band { display: inline-block; padding: .05rem .45rem; border-radius: 10px;
         font-size: .72rem; font-weight: 600; text-transform: lowercase;
         letter-spacing: .03em; color: #fff; }
-.band.calm   { background: var(--b-calm); }
+.band.clean   { background: var(--b-clean); }
 .band.notice { background: var(--b-notice); }
 .band.urgent { background: var(--b-urgent); }
 .band.forced { background: var(--b-forced); }
@@ -388,7 +388,7 @@ def _render_iteration(turn_idx: int, iter_idx: int, *, prev_msgs: list[dict],
                       and not _is_archived(_cstr(m)))
     added, mutated = _new_msg_indices(prev_msgs, cur_msgs)
 
-    # Compact one-line summary: «1.2  calm  14,818 tok · 4 msgs · +2 new»
+    # Compact one-line summary: «1.2  clean  14,818 tok · 4 msgs · +2 new»
     meta_bits = [f"{toks:,} tok", f"{len(cur_msgs)} msgs"]
     if live_blocks:
         meta_bits.append(f"{live_blocks} live")

@@ -64,7 +64,7 @@ def test_pre_llm_call_emits_note_at_notice_level(desk):
 
 
 def test_pre_llm_call_calm_returns_short_state_note(desk):
-    """Calm now emits a short '[desk: calm]' note (was None pre-v8) so the
+    """Clean now emits a short '[desk: clean]' note (was None pre-v8) so the
     model's most recent prompt always carries the current band — fixing the
     sync issue where a stale 'forced' note in history led to misuse."""
     import desk_core
@@ -73,8 +73,8 @@ def test_pre_llm_call_calm_returns_short_state_note(desk):
         session_id="s2")
     out = desk._on_pre_llm_call(session_id="s2", conversation_history=[])
     assert out is not None
-    assert "calm" in out["context"].lower()
-    # calm note must NOT carry the id-listing appendix (desk is fine)
+    assert "clean" in out["context"].lower()
+    # clean note must NOT carry the id-listing appendix (desk is fine)
     assert "ids on the desk" not in out["context"]
     assert "no archivable" not in out["context"]
 
@@ -109,12 +109,12 @@ def test_session_reset_clears_cached_tokens(desk):
         session_id="s5")
     desk._on_session_reset(session_id="s5")
     # after reset the cached count is gone — the next turn falls back to the
-    # chars/4 estimate (calm for an empty history), not a stale 'forced'.
-    # Post-v8: calm emits a short note so the state is positively signalled
-    # to the model on every iteration; assert it's the calm note (not forced).
+    # chars/4 estimate (clean for an empty history), not a stale 'forced'.
+    # Post-v8: clean emits a short note so the state is positively signalled
+    # to the model on every iteration; assert it's the clean note (not forced).
     out = desk._on_pre_llm_call(session_id="s5", conversation_history=[])
     assert out is not None
-    assert "calm" in out["context"].lower()
+    assert "clean" in out["context"].lower()
     assert "forced" not in out["context"].lower()
 
 
@@ -124,11 +124,11 @@ def _set_level(tmp_path, sid, lvl):
 
 
 def test_pre_tool_call_blocks_shred_at_calm(desk, tmp_path):
-    _set_level(tmp_path, "s6", "calm")
+    _set_level(tmp_path, "s6", "clean")
     r = desk._on_pre_tool_call(tool_name="shred", session_id="s6")
     assert isinstance(r, dict) and r.get("action") == "block"
     assert "shred is unavailable" in r["message"]
-    assert "calm" in r["message"]
+    assert "clean" in r["message"]
     # the denial must explain the band may have dropped since the model saw
     # a higher-band note (the sync issue) — so the model doesn't read the
     # block as a contradiction
@@ -153,14 +153,14 @@ def test_pre_tool_call_allows_shred_at_forced(desk, tmp_path):
 
 
 def test_pre_tool_call_ignores_non_shred_tools(desk, tmp_path):
-    _set_level(tmp_path, "s10", "calm")
+    _set_level(tmp_path, "s10", "clean")
     assert desk._on_pre_tool_call(tool_name="archive", session_id="s10") is None
     assert desk._on_pre_tool_call(tool_name="recall", session_id="s10") is None
     assert desk._on_pre_tool_call(tool_name="read_file", session_id="s10") is None
 
 
 def test_pre_tool_call_defaults_to_calm_when_no_level_file(desk):
-    # fresh session with no level file → treat as calm → shred blocked
+    # fresh session with no level file → treat as clean → shred blocked
     r = desk._on_pre_tool_call(tool_name="shred", session_id="never-seen")
     assert isinstance(r, dict) and r.get("action") == "block"
 
@@ -214,15 +214,15 @@ def test_pre_llm_call_uses_calibrated_estimate_for_delta(desk):
     bigger = [{"role": "user", "content": "y" * 20_000}]    # ~5000 chars/4
     desk._on_pre_llm_call(session_id="cal2", conversation_history=bigger)
     # The level file is what the hook actually wrote — verify the level
-    # corresponds to 29k tokens (which is well below 49k notice — calm).
+    # corresponds to 29k tokens (which is well below 49k notice — clean).
     import desk_core
     lf = desk_core.state_dir() / "cal2.level"
-    assert lf.read_text(encoding="utf-8") == "calm"
+    assert lf.read_text(encoding="utf-8") == "clean"
     # Now simulate a much larger conversation that would cross notice:
     # at the calibrated rate, real = 25k + (huge_chars4 - 1000).
     huge_chars4 = int(desk_core.EFFECTIVE_CTX * 0.85 - 25_000 + 1000)
     desk._TOK_BASELINE["cal2"] = (25_000, 1000)   # reset baseline
-    desk._level_file("cal2").write_text("calm", encoding="utf-8")  # reset
+    desk._level_file("cal2").write_text("clean", encoding="utf-8")  # reset
     huge = [{"role": "user", "content": "z" * (huge_chars4 * 4)}]
     out = desk._on_pre_llm_call(session_id="cal2", conversation_history=huge)
     assert out is not None
