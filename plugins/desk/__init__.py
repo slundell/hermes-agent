@@ -51,6 +51,17 @@ _PROC_START = time.time()
 # turn of each session falls back to the estimate until the first response.
 _LAST_PROMPT_TOKENS: "dict[str, int]" = {}
 
+# Calibration: pre_llm_call sees `conversation_history` (the messages about
+# to be sent) and computes a chars/4 estimate for them. After the response,
+# post_api_request gets `usage.prompt_tokens` — the *real* count, which also
+# includes the system prompt and tool schemas (~tens of thousands of tokens
+# of constant per-session overhead the chars/4-of-messages misses). Storing
+# (real, chars4_of_msgs_at_that_request) as a baseline lets pre_llm_call
+# estimate this-call's real tokens as `real_baseline + (chars4_now -
+# chars4_baseline)` — current-iteration accurate, no one-call lag.
+_TOK_BASELINE: "dict[str, tuple[int, int]]" = {}     # sid -> (real, chars4)
+_PENDING_CHARS4: "dict[str, int]" = {}                # sid -> chars4 of in-flight request
+
 CTRACE_DROP_MSGS = int(os.environ.get("CTRACE_DROP_MSGS", "8"))
 CTRACE_DROP_IDS = int(os.environ.get("CTRACE_DROP_IDS", "5"))
 
@@ -80,22 +91,35 @@ def _msg_chars(m) -> int:
 
 
 def _on_post_api_request(usage=None, session_id="", **_):
-    """Capture the real prompt-token count from each API response."""
+    """Capture the real prompt-token count from each API response, and
+    calibrate against the chars/4 estimate the matching pre_llm_call stored
+    in `_PENDING_CHARS4`. The (real, chars4) baseline lets the next
+    pre_llm_call estimate this-call's real tokens without waiting for a
+    response — softening the previous one-iteration lag."""
     if not isinstance(usage, dict):
         return
     try:
         pt = int(usage.get("prompt_tokens"))
     except (TypeError, ValueError):
         return
-    if pt > 0:
-        _LAST_PROMPT_TOKENS[session_id or "default"] = pt
+    if pt <= 0:
+        return
+    sid = session_id or "default"
+    _LAST_PROMPT_TOKENS[sid] = pt
+    chars4 = _PENDING_CHARS4.pop(sid, None)
+    if chars4 is not None and chars4 >= 0:
+        _TOK_BASELINE[sid] = (pt, chars4)
 
 
 def _on_session_reset(session_id="", **_):
-    """Drop the cached count on reset — the post-reset context is small but
-    the last-seen count is stale-high; without this the first post-reset turn
-    would read as 'forced' and wrongly restrict tools."""
-    _LAST_PROMPT_TOKENS.pop(session_id or "default", None)
+    """Drop the cached count and calibration on reset — the post-reset
+    context is small but the last-seen values are stale-high; without this
+    the first post-reset turn would read as 'forced' and wrongly restrict
+    tools."""
+    sid = session_id or "default"
+    _LAST_PROMPT_TOKENS.pop(sid, None)
+    _TOK_BASELINE.pop(sid, None)
+    _PENDING_CHARS4.pop(sid, None)
 
 
 # --- watermark note (was: desk-note) --------------------------------------
@@ -106,13 +130,23 @@ def _level_file(session_id):
 def _on_pre_llm_call(session_id="", conversation_history=None, **_):
     msgs = conversation_history or []
     sid = session_id or "default"
-    real = _LAST_PROMPT_TOKENS.get(sid)
-    if real is not None:
-        tokens = float(real)
+    chars4_now = sum(_msg_chars(m) for m in msgs) // 4
+    # Estimate this-call's real prompt tokens. Prefer the calibrated baseline
+    # (real_baseline + delta from chars/4) so growth WITHIN a turn shows up in
+    # the level immediately. Fall back to last-real, then chars/4 alone, when
+    # no calibration is available yet.
+    baseline = _TOK_BASELINE.get(sid)
+    if baseline:
+        real_baseline, chars4_baseline = baseline
+        tokens = float(max(0, real_baseline + (chars4_now - chars4_baseline)))
+    elif sid in _LAST_PROMPT_TOKENS:
+        tokens = float(_LAST_PROMPT_TOKENS[sid])
     else:
-        # No real count yet (first turn after a fresh process start, or just
-        # after a session reset) — fall back to a chars/4 estimate.
-        tokens = sum(_msg_chars(m) for m in msgs) / 4.0
+        tokens = float(chars4_now)
+    # Store the chars/4 of this in-flight request so post_api_request can
+    # pair it with the response's real prompt_tokens to update the baseline.
+    _PENDING_CHARS4[sid] = chars4_now
+
     frac = desk_core.fill_fraction(tokens)
 
     lf = _level_file(sid)
@@ -139,8 +173,11 @@ def _on_pre_llm_call(session_id="", conversation_history=None, **_):
     note = desk_core.NOTES.get(lvl)
     if not note:
         return None
-    # carry the real id set so the model tidies only ids it can see.
-    ids = desk_core.block_ids_on_desk(msgs)
+    # Carry only the LIVE block ids — archived placeholders stay in the
+    # message stream as recall handles but don't appear in the note, so the
+    # model sees archiving visibly clear the desk instead of misreading
+    # placeholders as "occupied slots".
+    ids = desk_core.live_block_ids_on_desk(msgs)
     if ids:
         note = note[:-1] + f"; ids on the desk: {desk_core.collapse_ranges(ids)}]"
     return {"context": note}

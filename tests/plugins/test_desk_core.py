@@ -42,6 +42,20 @@ def test_block_ids_on_desk(dc):
     assert dc.block_ids_on_desk(msgs) == [1, 3]
 
 
+def test_live_block_ids_on_desk_excludes_placeholders(dc):
+    msgs = [
+        {"role": "tool", "content": "[b5] live content"},
+        {"role": "tool", "content": "[b6] (archived: 1234 chars moved off the desk — recall b6 to bring it back)"},
+        {"role": "tool", "content": "[b7] another live block"},
+        {"role": "tool", "content": "[b8] (archived: 99 chars moved off the desk — recall b8 to bring it back)"},
+    ]
+    # full view (used by the rollback diagnostic) sees everything
+    assert dc.block_ids_on_desk(msgs) == [5, 6, 7, 8]
+    # live view (used by the desk-note's "ids on the desk" listing) hides
+    # placeholders so the model isn't misled into treating them as slots
+    assert dc.live_block_ids_on_desk(msgs) == [5, 7]
+
+
 def test_collapse_ranges(dc):
     assert dc.collapse_ranges([1, 2, 3, 5, 6]) == "b1–b3, b5, b6"
     assert dc.collapse_ranges([4]) == "b4"

@@ -154,3 +154,71 @@ def test_register_now_includes_pre_tool_call(desk):
     ctx = _FakeCtx()
     desk.register(ctx)
     assert "pre_tool_call" in ctx.hooks
+
+
+# --- note lists LIVE ids only ---------------------------------------------
+def test_pre_llm_call_note_lists_live_ids_only(desk):
+    import desk_core
+    # push the session to notice so a note is emitted
+    desk._on_post_api_request(
+        usage={"prompt_tokens": int(desk_core.EFFECTIVE_CTX * 0.85)},
+        session_id="ids-live")
+    msgs = [
+        {"role": "tool", "content": "[b10] live data"},
+        {"role": "tool", "content": "[b11] (archived: 9000 chars moved off the desk — recall b11 to bring it back)"},
+        {"role": "tool", "content": "[b12] another live"},
+    ]
+    out = desk._on_pre_llm_call(session_id="ids-live", conversation_history=msgs)
+    assert out is not None
+    # b11 is an archived placeholder and must NOT appear in the listing
+    assert "ids on the desk: b10, b12" in out["context"]
+    assert "b11" not in out["context"]
+
+
+# --- calibration softens the level lag ------------------------------------
+def test_calibration_baseline_set_by_post_api_request(desk):
+    # Simulate a real turn: pre_llm_call sees a conversation, post_api_request
+    # gets the real prompt_tokens. The baseline gets recorded.
+    msgs = [{"role": "user", "content": "x" * 4000}]   # 1000 chars/4 estimate
+    desk._on_pre_llm_call(session_id="cal", conversation_history=msgs)
+    # response reports 25,000 real tokens — system+tools accounted for
+    desk._on_post_api_request(
+        usage={"prompt_tokens": 25_000}, session_id="cal")
+    assert desk._TOK_BASELINE.get("cal") == (25_000, 1000)
+    # the in-flight chars4 was consumed by the post-handler
+    assert "cal" not in desk._PENDING_CHARS4
+
+
+def test_pre_llm_call_uses_calibrated_estimate_for_delta(desk):
+    import desk_core
+    # Calibration: at chars/4 = 1000, real = 25k.
+    desk._TOK_BASELINE["cal2"] = (25_000, 1000)
+    # Next call sees a bigger conversation — chars/4 grows to 5000
+    # (a +4000 chars/4 delta). The estimate the watermark uses should be
+    # 25k + 4k = 29k tokens, NOT the stale 25k from last response.
+    bigger = [{"role": "user", "content": "y" * 20_000}]    # ~5000 chars/4
+    desk._on_pre_llm_call(session_id="cal2", conversation_history=bigger)
+    # The level file is what the hook actually wrote — verify the level
+    # corresponds to 29k tokens (which is well below 49k notice — calm).
+    import desk_core
+    lf = desk_core.state_dir() / "cal2.level"
+    assert lf.read_text(encoding="utf-8") == "calm"
+    # Now simulate a much larger conversation that would cross notice:
+    # at the calibrated rate, real = 25k + (huge_chars4 - 1000).
+    huge_chars4 = int(desk_core.EFFECTIVE_CTX * 0.85 - 25_000 + 1000)
+    desk._TOK_BASELINE["cal2"] = (25_000, 1000)   # reset baseline
+    desk._level_file("cal2").write_text("calm", encoding="utf-8")  # reset
+    huge = [{"role": "user", "content": "z" * (huge_chars4 * 4)}]
+    out = desk._on_pre_llm_call(session_id="cal2", conversation_history=huge)
+    assert out is not None
+    assert "filling up" in out["context"]    # notice-band note
+
+
+def test_calibration_cleared_on_session_reset(desk):
+    desk._TOK_BASELINE["cal3"] = (50_000, 10_000)
+    desk._PENDING_CHARS4["cal3"] = 12_000
+    desk._LAST_PROMPT_TOKENS["cal3"] = 50_000
+    desk._on_session_reset(session_id="cal3")
+    assert "cal3" not in desk._TOK_BASELINE
+    assert "cal3" not in desk._PENDING_CHARS4
+    assert "cal3" not in desk._LAST_PROMPT_TOKENS

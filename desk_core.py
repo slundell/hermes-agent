@@ -65,13 +65,35 @@ def is_stamped(content: str) -> bool:
 
 
 def block_ids_on_desk(messages) -> "list[int]":
-    """Sorted block numbers of every [bN]-stamped tool result in messages."""
+    """Sorted block numbers of every [bN]-stamped tool result in messages
+    (live blocks AND archived placeholders). Use for diagnostics that need a
+    full view, like the context-trace rollback detector."""
     ids = []
     for m in messages or []:
         if not isinstance(m, dict) or m.get("role") != "tool":
             continue
         bid = block_id(content_str(m))
         if bid:
+            ids.append(int(bid[1:]))
+    return sorted(set(ids))
+
+
+def live_block_ids_on_desk(messages) -> "list[int]":
+    """Sorted block numbers of LIVE (non-archived) tool-result blocks.
+
+    Archived blocks remain as one-line placeholders in the message stream so
+    `recall` can still find them, but they take negligible space. Listing
+    placeholders in the desk-note's "ids on the desk" caused the model to
+    misread them as "occupied slots" and deadlock-narrate at the forced band.
+    The note now lists only live ids — placeholders are invisible there, so
+    archiving visibly clears the desk."""
+    ids = []
+    for m in messages or []:
+        if not isinstance(m, dict) or m.get("role") != "tool":
+            continue
+        c = content_str(m)
+        bid = block_id(c)
+        if bid and "(archived:" not in c:
             ids.append(int(bid[1:]))
     return sorted(set(ids))
 
