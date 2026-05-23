@@ -191,134 +191,170 @@ def _new_msg_indices(prev_msgs: list[dict],
 
 # --- HTML rendering -------------------------------------------------------
 _CSS = """
-:root { color-scheme: light dark; }
-body { font-family: ui-sans-serif, system-ui, sans-serif;
-       margin: 0; padding: 1rem; line-height: 1.4;
-       background: #fafafa; color: #222; max-width: 1400px; }
-@media (prefers-color-scheme: dark) {
-  body { background: #1a1a1a; color: #ddd; }
-  pre, code { background: #2a2a2a; }
-  details { background: #232323; border-color: #3a3a3a; }
-  .badge { background: #2a2a2a; border: 1px solid #444; }
-  .note { background: #3a2f00; border-color: #6a5300; color: #ffe49a; }
-  .arch { background: #1a3a2a; border-color: #2a5a3a; color: #b0e8c8; }
-  .err  { background: #3a1a1a; border-color: #6a2a2a; color: #ffb0b0; }
-  .turn { background: #1f2540; border-color: #303860; }
-  .iter { background: #232323; border-left-color: #557; }
-  a { color: #6aafff; }
+:root {
+  color-scheme: light dark;
+  --ink: #222; --muted: #888; --rule: #e6e6e6;
+  --bg: #fafafa; --card: #fff;
+  --t-system: #c97a00; --t-user: #1e6fc9; --t-agent: #189a3e; --t-tool: #a040b8;
+  --b-calm: #2e8b57; --b-notice: #b8860b; --b-urgent: #c75a00; --b-forced: #c83838;
 }
-h1 { font-size: 1.3rem; margin: 0 0 .5rem; }
-.meta { font-size: .8rem; color: #888; margin-left: auto; }
-.summary-row { display: flex; gap: 1rem; flex-wrap: wrap;
-               padding: .6rem .8rem; background: #fff;
-               border: 1px solid #ddd; border-radius: 6px; margin: .5rem 0; }
 @media (prefers-color-scheme: dark) {
-  .summary-row { background: #232323; border-color: #444; }
+  :root {
+    --ink: #ddd; --muted: #8a8a8a; --rule: #333;
+    --bg: #1a1a1a; --card: #222;
+    --t-system: #f0a040; --t-user: #5aa9ff; --t-agent: #4cce6a; --t-tool: #c885d6;
+    --b-calm: #4caf50; --b-notice: #d0a020; --b-urgent: #e89030; --b-forced: #e85050;
+  }
 }
-.summary-row .kv { display: flex; gap: .3rem; }
-.summary-row .kv b { font-variant-numeric: tabular-nums; }
-details { margin: .35rem 0; padding: .4rem .6rem;
-          background: #fff; border: 1px solid #ddd; border-radius: 6px; }
-details > summary { cursor: pointer; outline: none;
-                    display: flex; align-items: center;
-                    gap: .5rem; flex-wrap: wrap; }
-details[open] > summary { margin-bottom: .4rem; }
-details.turn { background: #f0f4ff; border-color: #c0d0f0; padding: .5rem .8rem;
-               margin: .8rem 0; }
-details.iter { background: #fafafa; border-left: 3px solid #aab; padding: .35rem .6rem;
-               margin: .25rem 0 .25rem 1rem; }
-/* per-talker left stripe so the speaker is visible at a glance */
-details.msg.talker-system    { border-left: 4px solid #f0a000; }
-details.msg.talker-user      { border-left: 4px solid #2080e0; }
-details.msg.talker-agent     { border-left: 4px solid #20a040; }
-details.msg.talker-tool      { border-left: 4px solid #c060d0; }
-.badge { display: inline-block; padding: .05rem .4rem; border-radius: 3px;
-         font: .8rem ui-monospace, SFMono-Regular, Menlo, monospace;
-         background: #eee; border: 1px solid #ccc; color: inherit; }
-.badge.talker { font-size: .85rem; font-weight: 600; padding: .1rem .5rem;
-                letter-spacing: .03em; }
-.badge.talker.system { background: #fff0e0; border-color: #f0c090; color: #8a4a00; }
-.badge.talker.user   { background: #e0f0ff; border-color: #90c0f0; color: #003a8a; }
-.badge.talker.agent  { background: #e0ffe0; border-color: #90f090; color: #006a00; }
-.badge.talker.tool   { background: #ffe0ff; border-color: #f090f0; color: #6a006a; }
-.badge.bid    { background: #2a2a3a; border: 1px solid #4a4a6a; color: #b0b0ff;
-                font-weight: bold; }
-.badge.lvl-calm   { background: #d0f0d0; color: #003a00; border-color: #a0d0a0; }
-.badge.lvl-notice { background: #fff0a0; color: #5a4a00; border-color: #d0c060; }
-.badge.lvl-urgent { background: #ffd090; color: #6a3a00; border-color: #d09060; }
-.badge.lvl-forced { background: #ff9090; color: #6a0000; border-color: #d05050; }
-.badge.turn-tag { background: #c0d0f0; color: #003a8a; font-weight: bold; }
-.note  { background: #fff8d0; border: 1px solid #d0c060; color: #5a4a00;
-         padding: .3rem .5rem; border-radius: 4px; font-size: .85rem; }
-.arch  { background: #d0f0d8; border: 1px solid #a0d0b0; color: #003a18;
-         padding: .3rem .5rem; border-radius: 4px; font-size: .85rem; }
-.err   { background: #ffd0d0; border: 1px solid #d09090; color: #6a0000;
-         padding: .3rem .5rem; border-radius: 4px; font-size: .85rem; }
-pre { background: #f0f0f0; border: 1px solid #ddd; border-radius: 4px;
-      padding: .6rem; overflow-x: auto; white-space: pre-wrap;
-      word-break: break-word; max-height: 50vh;
-      font: .82rem ui-monospace, SFMono-Regular, Menlo, monospace; }
-.idx  { color: #888; font-variant-numeric: tabular-nums;
-        min-width: 2.5rem; display: inline-block; }
-.toolcall { margin-top: .4rem; padding: .3rem .5rem;
-            background: #f8f0ff; border-left: 3px solid #c090e0;
-            border-radius: 3px; font-size: .85rem; }
-@media (prefers-color-scheme: dark) {
-  pre { background: #2a2a2a; border-color: #444; }
-  .toolcall { background: #2a1a3a; border-left-color: #8a6ac0; color: #d0b0ff; }
-}
-.mutated { border-left: 3px solid #f0a040; padding-left: .4rem; }
-.section-foot { font-size: .8rem; color: #888; margin-top: .4rem; }
+* { box-sizing: border-box; }
+body { font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+       margin: 0; padding: 1.5rem 1.25rem 4rem; line-height: 1.5;
+       background: var(--bg); color: var(--ink);
+       max-width: 1200px; margin-inline: auto;
+       font-size: 14.5px; }
+h1 { font-size: 1.1rem; margin: 0; font-weight: 600;
+     color: var(--ink); letter-spacing: -.005em; }
+h1 code { font: inherit; font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+          color: var(--muted); font-weight: 500; }
+.subtitle { color: var(--muted); font-size: .85rem; margin: .2rem 0 1.5rem; }
+.session-stats { display: flex; gap: 1.5rem; flex-wrap: wrap;
+                 padding: .8rem 0 1.2rem;
+                 border-bottom: 1px solid var(--rule);
+                 margin-bottom: 1.5rem; font-size: .9rem; }
+.session-stats .kv { display: flex; gap: .35rem; align-items: baseline; }
+.session-stats .kv .k { color: var(--muted); font-size: .8rem; }
+.session-stats .kv .v { font-weight: 600; font-variant-numeric: tabular-nums; }
+details { background: transparent; border: none; padding: 0; margin: 0; }
+details > summary { cursor: pointer; outline: none; list-style: none;
+                    display: flex; align-items: baseline;
+                    gap: .6rem; flex-wrap: wrap; }
+details > summary::-webkit-details-marker { display: none; }
+details > summary::before { content: "▸"; color: var(--muted);
+                            font-size: .7rem; transform: translateY(-1px); }
+details[open] > summary::before { content: "▾"; }
+/* Turn = the strong heading. */
+details.turn { margin: 1.2rem 0 0; padding: .5rem 0 .3rem;
+               border-top: 1px solid var(--rule); }
+details.turn:first-of-type { border-top: none; margin-top: 0; }
+details.turn > summary { font-size: 1rem; }
+.turn-num { font-weight: 700; color: var(--ink); letter-spacing: -.005em; }
+.turn-prompt { flex: 1 1 18rem; color: var(--ink); font-weight: 500;
+               overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.turn-meta { margin-left: auto; color: var(--muted); font-size: .8rem;
+             font-variant-numeric: tabular-nums; }
+/* Iteration = compact subheading. */
+details.iter { margin: .35rem 0 .35rem 1.1rem; padding: .15rem 0;
+               font-size: .9rem; }
+details.iter > summary { color: var(--muted); }
+.iter-num { font-weight: 600; color: var(--ink); font-variant-numeric: tabular-nums;
+            font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.iter-meta { color: var(--muted); font-size: .82rem;
+             font-variant-numeric: tabular-nums; }
+/* Message rows = subtle, with a left color stripe by talker. */
+details.msg { margin: .2rem 0 .2rem 2rem; padding: .15rem .5rem;
+              border-left: 3px solid var(--rule); }
+details.msg.talker-system { border-left-color: var(--t-system); }
+details.msg.talker-user   { border-left-color: var(--t-user); }
+details.msg.talker-agent  { border-left-color: var(--t-agent); }
+details.msg.talker-tool   { border-left-color: var(--t-tool); }
+details.msg > summary { font-size: .88rem; }
+.talker { font-weight: 600; font-size: .82rem;
+          text-transform: lowercase; letter-spacing: .02em;
+          font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.talker.system { color: var(--t-system); }
+.talker.user   { color: var(--t-user); }
+.talker.agent  { color: var(--t-agent); }
+.talker.tool   { color: var(--t-tool); }
+.bid { font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+       color: var(--muted); font-size: .8rem; }
+.kind { color: var(--muted); font-size: .8rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.preview { color: var(--muted); flex: 1 1 12rem;
+           overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.size { color: var(--muted); font-size: .75rem; margin-left: auto;
+        font-variant-numeric: tabular-nums; }
+.idx { color: var(--muted); font-size: .75rem; min-width: 2.2rem;
+       font-variant-numeric: tabular-nums;
+       font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+/* Band pill — small coloured chip used in iter/turn headers. */
+.band { display: inline-block; padding: .05rem .45rem; border-radius: 10px;
+        font-size: .72rem; font-weight: 600; text-transform: lowercase;
+        letter-spacing: .03em; color: #fff; }
+.band.calm   { background: var(--b-calm); }
+.band.notice { background: var(--b-notice); }
+.band.urgent { background: var(--b-urgent); }
+.band.forced { background: var(--b-forced); }
+/* Inline note (desk-note in user context) — subtle yellow tint. */
+.note { color: var(--ink); background: rgba(200,150,0,.10);
+        padding: .1rem .4rem; border-radius: 3px; font-size: .82rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.arch { color: var(--muted); font-size: .8rem;
+        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.mut  { color: var(--b-urgent); font-size: .75rem; font-weight: 600; }
+/* Expanded content. */
+pre  { background: rgba(0,0,0,.04); border: none; border-radius: 4px;
+       padding: .6rem .7rem; overflow-x: auto; white-space: pre-wrap;
+       word-break: break-word; max-height: 55vh;
+       font: 12.5px ui-monospace, SFMono-Regular, Menlo, monospace;
+       margin: .5rem 0; line-height: 1.5; }
+@media (prefers-color-scheme: dark) { pre { background: rgba(255,255,255,.04); } }
+.toolcall { margin: .35rem 0 .15rem; padding: .25rem .55rem;
+            border-left: 2px solid var(--t-agent);
+            font-size: .82rem; color: var(--muted); }
+.toolcall code { color: var(--ink);
+                 font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+.section-foot { font-size: .75rem; color: var(--muted); margin: .4rem 0 .2rem;
+                text-transform: uppercase; letter-spacing: .08em; font-weight: 500; }
 """
 
 
 def _render_message(idx: int, m: dict, *, mutated: bool = False) -> str:
     role = m.get("role", "?")
-    # Map technical role → user-facing talker label. "assistant" is hermes's
-    # internal name; "agent" reads more naturally in the preview.
     talker = {"assistant": "agent"}.get(role, role)
     content = _cstr(m)
     chars = _msg_chars(m)
     bid = _block_id(content) if role == "tool" else None
     archived = _is_archived(content) if bid else False
-    badges = [f'<span class="badge talker {_h(talker)}">{_h(talker)}</span>']
-    tail = ""
     open_attr = ""
 
+    parts: list[str] = [f'<span class="idx">#{idx}</span>',
+                        f'<span class="talker {_h(talker)}">{_h(talker)}</span>']
+    if mutated:
+        parts.append('<span class="mut" title="mutated since prior iteration">~</span>')
+
     if bid:
-        badges.append(f'<span class="badge bid">{_h(bid)}</span>')
+        parts.append(f'<span class="bid">{_h(bid)}</span>')
         if archived:
-            tail = f'<span class="arch">{_h(content)}</span>'
+            parts.append(f'<span class="arch preview">{_h(content)}</span>')
         else:
             kind, summ = _classify_tool(content)
-            badges.append(f'<span class="badge">{_h(kind)}</span>')
-            tail = f'<span class="meta">{_h(summ)}</span>'
+            parts.append(f'<span class="kind">{_h(kind)}</span>')
+            parts.append(f'<span class="preview">{_h(summ)}</span>')
     elif role == "user":
         note = _detect_desk_note(content)
         if note:
             mb = re.search(r"\[desk:\s*(\w+)", note)
             if mb:
-                badges.append(f'<span class="badge lvl-{_h(mb.group(1).lower())}">'
-                              f'{_h(mb.group(1).lower())}</span>')
-            tail = f'<span class="note">{_h(note)}</span>'
+                parts.append(f'<span class="band {_h(mb.group(1).lower())}">'
+                             f'{_h(mb.group(1).lower())}</span>')
+            parts.append(f'<span class="note">{_h(note)}</span>')
             open_attr = " open"
         else:
-            preview = content.replace("\n", " ").strip()[:140]
-            tail = f'<span class="meta">{_h(preview)}</span>'
+            preview = content.replace("\n", " ").strip()[:200]
+            parts.append(f'<span class="preview">{_h(preview)}</span>')
     elif role == "assistant":
         tcs = m.get("tool_calls") or []
         if tcs:
             names = ", ".join(tc.get("function", {}).get("name", "?") for tc in tcs)
-            badges.append(f'<span class="badge">{_h(names)}</span>')
-        preview = content.replace("\n", " ").strip()[:140]
+            parts.append(f'<span class="kind">→ {_h(names)}</span>')
+        preview = content.replace("\n", " ").strip()[:200]
         if preview:
-            tail = f'<span class="meta">{_h(preview)}</span>'
+            parts.append(f'<span class="preview">{_h(preview)}</span>')
     else:
-        preview = content.replace("\n", " ").strip()[:140]
-        tail = f'<span class="meta">{_h(preview)}</span>'
+        preview = content.replace("\n", " ").strip()[:200]
+        parts.append(f'<span class="preview">{_h(preview)}</span>')
 
-    size_b = f'<span class="meta">{chars:,} chars</span>'
-    mut_b = '<span class="badge" title="mutated since previous iteration">~</span>' if mutated else ""
+    parts.append(f'<span class="size">{chars:,}c</span>')
 
     body = ""
     if not (bid and archived):
@@ -328,26 +364,20 @@ def _render_message(idx: int, m: dict, *, mutated: bool = False) -> str:
             name = tc.get("function", {}).get("name", "?")
             args = tc.get("function", {}).get("arguments", "")
             tcid = tc.get("id", "?")
-            body += (f'<div class="toolcall"><b>tool_call</b> '
-                     f'<code>{_h(name)}</code> '
-                     f'<span class="meta">id={_h(tcid)}</span>'
+            body += (f'<div class="toolcall"><code>{_h(name)}</code> '
+                     f'<span class="size">id={_h(tcid)}</span>'
                      f'<pre>{_h(args)}</pre></div>')
 
-    summary = (f'<span class="idx">#{idx}</span> '
-               + " ".join(badges) + " "
-               + (mut_b + " " if mut_b else "")
-               + tail + " " + size_b)
-    classes = f"msg talker-{talker}"
-    if mutated:
-        classes += " mutated"
+    summary = " ".join(parts)
+    cls = f"msg talker-{talker}"
     if body:
-        return (f'<details{open_attr} class="{classes}">'
+        return (f'<details{open_attr} class="{cls}">'
                 f'<summary>{summary}</summary>{body}</details>')
-    return f'<details class="{classes}"><summary>{summary}</summary></details>'
+    return f'<details class="{cls}"><summary>{summary}</summary></details>'
 
 
 def _render_iteration(turn_idx: int, iter_idx: int, *, prev_msgs: list[dict],
-                      cur_msgs: list[dict]) -> str:
+                      cur_msgs: list[dict], open_default: bool = False) -> str:
     chars = sum(_msg_chars(m) for m in cur_msgs)
     toks = chars // 4
     band = _band(toks)
@@ -358,28 +388,27 @@ def _render_iteration(turn_idx: int, iter_idx: int, *, prev_msgs: list[dict],
                       and not _is_archived(_cstr(m)))
     added, mutated = _new_msg_indices(prev_msgs, cur_msgs)
 
-    badges = [f'<span class="badge lvl-{band}">band: {band}</span>',
-              f'<span class="badge">~{toks:,} tok</span>',
-              f'<span class="badge">msgs {len(cur_msgs)}</span>',
-              f'<span class="badge">live blocks {live_blocks}</span>']
+    # Compact one-line summary: «1.2  calm  14,818 tok · 4 msgs · +2 new»
+    meta_bits = [f"{toks:,} tok", f"{len(cur_msgs)} msgs"]
+    if live_blocks:
+        meta_bits.append(f"{live_blocks} live")
     if archived_count:
-        badges.append(f'<span class="badge">archived {archived_count}</span>')
+        meta_bits.append(f"{archived_count} archived")
     if added:
-        badges.append(f'<span class="badge">+{len(added)} new</span>')
+        meta_bits.append(f"+{len(added)} new")
     if mutated:
-        badges.append(f'<span class="badge">~{len(mutated)} mutated</span>')
-
-    label = f"<b>iter {turn_idx}.{iter_idx}</b>"
-    summary = label + " " + " ".join(badges)
+        meta_bits.append(f"~{len(mutated)} mutated")
+    summary = (f'<span class="iter-num">{turn_idx}.{iter_idx}</span> '
+               f'<span class="band {band}">{band}</span> '
+               f'<span class="iter-meta">{" · ".join(meta_bits)}</span>')
 
     body = ""
-    # Render added messages (default-open one level)
     if added:
-        body += '<div class="section-foot"><b>added</b></div>'
+        body += '<div class="section-foot">added</div>'
         for i in added:
             body += _render_message(i, cur_msgs[i])
     if mutated:
-        body += '<div class="section-foot"><b>mutated since last iteration</b></div>'
+        body += '<div class="section-foot">mutated</div>'
         for i in mutated:
             body += _render_message(i, cur_msgs[i], mutated=True)
     if not added and not mutated:
@@ -387,10 +416,13 @@ def _render_iteration(turn_idx: int, iter_idx: int, *, prev_msgs: list[dict],
                  '(no message-level changes — same prompt as prior iteration)'
                  '</div>')
 
-    return f'<details class="iter"><summary>{summary}</summary>{body}</details>'
+    open_attr = " open" if open_default else ""
+    return f'<details class="iter"{open_attr}><summary>{summary}</summary>{body}</details>'
 
 
-def _render_turn(turn_idx: int, dumps: list[tuple[str, dict]]) -> str:
+def _render_turn(turn_idx: int, dumps: list[tuple[str, dict]],
+                 *, initial_prev_msgs: list[dict] | None = None,
+                 open_default: bool = False) -> tuple[str, list[dict]]:
     if not dumps:
         return ""
     first_msgs = _msgs(dumps[0][1])
@@ -399,43 +431,47 @@ def _render_turn(turn_idx: int, dumps: list[tuple[str, dict]]) -> str:
     last_toks = last_chars // 4
     last_band = _band(last_toks)
 
-    # find this turn's user prompt — the last role=user message in the first
-    # dump (the new user is at the tail of msgs at iteration start)
+    # the new user message at the head of this turn — last role=user in the
+    # first iteration's prompt (the new user msg is at the tail at iter start)
     user_msg = None
     for m in reversed(first_msgs):
         if m.get("role") == "user":
             user_msg = m
             break
     user_text = _cstr(user_msg) if user_msg else ""
-    # strip the desk-note from the preview if any
     user_preview = re.sub(r"\s*\[desk:[^\]]*\]\s*$", "", user_text).strip()
     user_preview = user_preview.replace("\n", " ")[:200]
 
-    # tidy ops emitted during this turn (delta from start to end)
     start_tidy = _tally_tidy(first_msgs)
     end_tidy = _tally_tidy(last_msgs)
     turn_tidy = {k: end_tidy.get(k, 0) - start_tidy.get(k, 0)
                  for k in ("archive", "recall", "shred")}
 
-    badges = [f'<span class="badge turn-tag">turn {turn_idx}</span>',
-              f'<span class="badge">{len(dumps)} iter</span>',
-              f'<span class="badge lvl-{last_band}">end: {last_band}</span>',
-              f'<span class="badge">end ~{last_toks:,} tok</span>']
+    # one-line, low-density summary: «Turn N — prompt … · 3 iter · 21k tok · band · tidy a/r/s»
+    meta_bits = [f"{len(dumps)} iter", f"{last_toks:,} tok"]
     if any(turn_tidy.values()):
-        ops = "/".join(str(turn_tidy[k]) for k in ("archive", "recall", "shred"))
-        badges.append(f'<span class="badge">tidy a/r/s = {ops}</span>')
-    summary = (" ".join(badges) +
-               f' <span class="meta">{_h(user_preview or "(no user msg)")}</span>')
+        a, r, s = (turn_tidy[k] for k in ("archive", "recall", "shred"))
+        meta_bits.append(f"a/r/s={a}/{r}/{s}")
+    summary = (f'<span class="turn-num">Turn {turn_idx}</span>'
+               f' <span class="turn-prompt">{_h(user_preview or "(no user msg)")}</span>'
+               f' <span class="band {last_band}">{last_band}</span>'
+               f' <span class="turn-meta">{" · ".join(meta_bits)}</span>')
 
     body = ""
-    prev_msgs: list[dict] = []
-    for k, (_path, d) in enumerate(dumps, start=1):
+    prev_msgs: list[dict] = list(initial_prev_msgs or [])
+    n = len(dumps)
+    for k, (_p, d) in enumerate(dumps, start=1):
         cur_msgs = _msgs(d)
+        # Auto-open the LAST iteration of the LAST turn — it's the live state.
+        iter_open = open_default and (k == n)
         body += _render_iteration(turn_idx, k,
-                                  prev_msgs=prev_msgs, cur_msgs=cur_msgs)
+                                  prev_msgs=prev_msgs, cur_msgs=cur_msgs,
+                                  open_default=iter_open)
         prev_msgs = cur_msgs
 
-    return f'<details class="turn"><summary>{summary}</summary>{body}</details>'
+    open_attr = " open" if open_default else ""
+    html_str = f'<details class="turn"{open_attr}><summary>{summary}</summary>{body}</details>'
+    return html_str, prev_msgs
 
 
 def _render_session_summary(sid: str, dumps: list[tuple[str, dict]],
@@ -447,6 +483,9 @@ def _render_session_summary(sid: str, dumps: list[tuple[str, dict]],
     last_toks = last_chars // 4
     band = _band(last_toks)
     tidy = _tally_tidy(last_msgs)
+    a = tidy.get("archive", 0)
+    r = tidy.get("recall", 0)
+    s = tidy.get("shred", 0)
     live_blocks = sum(1 for m in last_msgs
                       if m.get("role") == "tool" and _block_id(_cstr(m))
                       and not _is_archived(_cstr(m)))
@@ -455,17 +494,14 @@ def _render_session_summary(sid: str, dumps: list[tuple[str, dict]],
     kvs = [
         ("turns", str(len(turns))),
         ("iterations", str(len(dumps))),
-        ("end msgs", str(len(last_msgs))),
-        ("end ~tokens", f"{last_toks:,}"),
-        ("end band", band),
-        ("tidy archive", str(tidy.get("archive", 0))),
-        ("tidy recall", str(tidy.get("recall", 0))),
-        ("tidy shred", str(tidy.get("shred", 0))),
-        ("live blocks", str(live_blocks)),
-        ("archived blocks", str(archived)),
+        ("end ~tok", f"{last_toks:,}"),
+        ("end band", f'<span class="band {band}">{band}</span>'),
+        ("tidy a/r/s", f"{a}/{r}/{s}"),
+        ("blocks", f"{live_blocks} live · {archived} archived"),
     ]
-    return ('<div class="summary-row">' +
-            "".join(f'<span class="kv"><span>{_h(k)}:</span><b>{_h(v)}</b></span>'
+    return ('<div class="session-stats">' +
+            "".join(f'<span class="kv"><span class="k">{_h(k)}</span>'
+                    f'<span class="v">{v}</span></span>'
                     for k, v in kvs) + "</div>")
 
 
@@ -483,11 +519,23 @@ def render_session(sid: str, *,
     head = (f"<!doctype html><html><head><meta charset='utf-8'>"
             f"<title>desk preview — {_h(sid)}</title>"
             f"<style>{_CSS}</style></head><body>"
-            f"<h1>desk preview — <code>{_h(sid)}</code></h1>"
-            f"<div class='meta'>rendered {_h(ts)} · {len(dumps)} iterations · "
-            f"{len(turns)} turns · EFFECTIVE_CTX={EFFECTIVE_CTX:,} tok</div>")
+            f"<h1>desk preview <code>{_h(sid)}</code></h1>"
+            f"<div class='subtitle'>rendered {_h(ts)} · "
+            f"effective context {EFFECTIVE_CTX:,} tok</div>")
     summary = _render_session_summary(sid, dumps, turns)
-    body = "".join(_render_turn(i + 1, t) for i, t in enumerate(turns))
+    # Open the last turn by default — it's the live state. Older turns stay
+    # folded; the user opens them on demand. Thread prev_msgs across turn
+    # boundaries so each turn's first iter shows only the genuinely new
+    # messages (the new user prompt), not the entire cumulative history.
+    n_turns = len(turns)
+    body_parts: list[str] = []
+    prev_msgs: list[dict] = []
+    for i, t in enumerate(turns):
+        is_last = (i + 1 == n_turns)
+        h_str, prev_msgs = _render_turn(
+            i + 1, t, initial_prev_msgs=prev_msgs, open_default=is_last)
+        body_parts.append(h_str)
+    body = "".join(body_parts)
     h = head + summary + body + "</body></html>"
     out = out_path or f"{out_dir}/desk-preview-{sid}.html"
     out_p = Path(out)
