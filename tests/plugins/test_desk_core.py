@@ -87,6 +87,21 @@ def test_level_for_hysteresis_holds_band_on_exit(dc):
     assert dc.level_for(0.82, prev="urgent") == "notice"
 
 
+def test_notes_open_with_band_name(dc):
+    """Each non-calm note must open with the band's literal name so the model
+    has a positive signal of which band it's in (v6 drive showed Aina stalled
+    at forced asking the user to 'raise to urgent/forced' because the note
+    only said 'full' — she couldn't tell she was already at forced)."""
+    assert dc.NOTES["calm"] is None
+    assert "notice" in dc.NOTES["notice"].lower()
+    assert "urgent" in dc.NOTES["urgent"].lower()
+    assert "forced" in dc.NOTES["forced"].lower()
+    # each band's note should also mention which tidy ops are now usable
+    assert "shred" in dc.NOTES["notice"].lower()        # mentions shred status
+    assert "shred" in dc.NOTES["urgent"].lower()
+    assert "shred" in dc.NOTES["forced"].lower()
+
+
 def test_token_count_fallback_when_no_url(dc, monkeypatch):
     monkeypatch.setattr(dc, "DESK_TOKENIZER_URL", "")
     assert dc.token_count("") == 0

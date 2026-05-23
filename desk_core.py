@@ -182,12 +182,17 @@ HYSTERESIS = float(os.environ.get("DESK_HYSTERESIS", "0.05"))
 LEVELS = ["calm", "notice", "urgent", "forced"]
 _ENTRY = {"calm": 0.0, "notice": NOTICE_PCT, "urgent": URGENT_PCT, "forced": FORCED_PCT}
 
-# Descriptive notes — no percentages ever face the model.
+# Descriptive notes — no percentages ever face the model. Each note opens
+# with the band name so the model has a positive signal of which band it's
+# in (it can't infer that from "full" alone, and was stalling at forced
+# asking the user to "raise the level" because it didn't know it was
+# already AT forced — see v6 drive observation). Each band also names the
+# tidy tools currently available to it.
 NOTES = {
     "calm": None,
-    "notice": "[desk: filling up — archive a spent block when you can]",
-    "urgent": "[desk: nearly full — archive a spent block before continuing]",
-    "forced": "[desk: full — archive spent blocks now]",
+    "notice": "[desk: notice — filling up; archive a spent block when you can. shred is unavailable below urgent.]",
+    "urgent": "[desk: urgent — nearly full; archive a spent block before continuing. shred is now available.]",
+    "forced": "[desk: forced — full; archive or shred spent blocks now (only archive and shred are usable until you make room).]",
 }
 # Tools permitted at the forced level — context-REDUCING tidy ops only.
 # `recall` is excluded: it grows the desk.
