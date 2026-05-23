@@ -227,13 +227,20 @@ details.turn { background: #f0f4ff; border-color: #c0d0f0; padding: .5rem .8rem;
                margin: .8rem 0; }
 details.iter { background: #fafafa; border-left: 3px solid #aab; padding: .35rem .6rem;
                margin: .25rem 0 .25rem 1rem; }
+/* per-talker left stripe so the speaker is visible at a glance */
+details.msg.talker-system    { border-left: 4px solid #f0a000; }
+details.msg.talker-user      { border-left: 4px solid #2080e0; }
+details.msg.talker-agent     { border-left: 4px solid #20a040; }
+details.msg.talker-tool      { border-left: 4px solid #c060d0; }
 .badge { display: inline-block; padding: .05rem .4rem; border-radius: 3px;
          font: .8rem ui-monospace, SFMono-Regular, Menlo, monospace;
          background: #eee; border: 1px solid #ccc; color: inherit; }
-.badge.role-system { background: #fff0e0; border-color: #f0c090; color: #8a4a00; }
-.badge.role-user   { background: #e0f0ff; border-color: #90c0f0; color: #003a8a; }
-.badge.role-assistant { background: #e0ffe0; border-color: #90f090; color: #006a00; }
-.badge.role-tool   { background: #ffe0ff; border-color: #f090f0; color: #6a006a; }
+.badge.talker { font-size: .85rem; font-weight: 600; padding: .1rem .5rem;
+                letter-spacing: .03em; }
+.badge.talker.system { background: #fff0e0; border-color: #f0c090; color: #8a4a00; }
+.badge.talker.user   { background: #e0f0ff; border-color: #90c0f0; color: #003a8a; }
+.badge.talker.agent  { background: #e0ffe0; border-color: #90f090; color: #006a00; }
+.badge.talker.tool   { background: #ffe0ff; border-color: #f090f0; color: #6a006a; }
 .badge.bid    { background: #2a2a3a; border: 1px solid #4a4a6a; color: #b0b0ff;
                 font-weight: bold; }
 .badge.lvl-calm   { background: #d0f0d0; color: #003a00; border-color: #a0d0a0; }
@@ -267,11 +274,14 @@ pre { background: #f0f0f0; border: 1px solid #ddd; border-radius: 4px;
 
 def _render_message(idx: int, m: dict, *, mutated: bool = False) -> str:
     role = m.get("role", "?")
+    # Map technical role → user-facing talker label. "assistant" is hermes's
+    # internal name; "agent" reads more naturally in the preview.
+    talker = {"assistant": "agent"}.get(role, role)
     content = _cstr(m)
     chars = _msg_chars(m)
     bid = _block_id(content) if role == "tool" else None
     archived = _is_archived(content) if bid else False
-    badges = [f'<span class="badge role-{_h(role)}">{_h(role)}</span>']
+    badges = [f'<span class="badge talker {_h(talker)}">{_h(talker)}</span>']
     tail = ""
     open_attr = ""
 
@@ -327,10 +337,13 @@ def _render_message(idx: int, m: dict, *, mutated: bool = False) -> str:
                + " ".join(badges) + " "
                + (mut_b + " " if mut_b else "")
                + tail + " " + size_b)
-    cls = ' class="mutated"' if mutated else ""
+    classes = f"msg talker-{talker}"
+    if mutated:
+        classes += " mutated"
     if body:
-        return f'<details{open_attr}{cls}><summary>{summary}</summary>{body}</details>'
-    return f'<details{cls}><summary>{summary}</summary></details>'
+        return (f'<details{open_attr} class="{classes}">'
+                f'<summary>{summary}</summary>{body}</details>')
+    return f'<details class="{classes}"><summary>{summary}</summary></details>'
 
 
 def _render_iteration(turn_idx: int, iter_idx: int, *, prev_msgs: list[dict],
@@ -477,6 +490,16 @@ def render_session(sid: str, *,
     body = "".join(_render_turn(i + 1, t) for i, t in enumerate(turns))
     h = head + summary + body + "</body></html>"
     out = out_path or f"{out_dir}/desk-preview-{sid}.html"
-    Path(out).parent.mkdir(parents=True, exist_ok=True)
-    Path(out).write_text(h, encoding="utf-8")
+    out_p = Path(out)
+    out_p.parent.mkdir(parents=True, exist_ok=True)
+    out_p.write_text(h, encoding="utf-8")
+    # Also point the "latest" alias at this render — a stable URL the user
+    # can bookmark and reload across sessions. Most-recently-rendered wins.
+    # Use a regular file copy (not a symlink) so external file servers /
+    # NFS clients don't trip on link semantics.
+    latest = out_p.parent / "desk-preview-latest.html"
+    try:
+        latest.write_text(h, encoding="utf-8")
+    except Exception:
+        pass
     return out
