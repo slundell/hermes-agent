@@ -90,25 +90,88 @@ def _msg_chars(m) -> int:
     return n
 
 
-def _on_post_api_request(usage=None, session_id="", **_):
-    """Capture the real prompt-token count from each API response, and
-    calibrate against the chars/4 estimate the matching pre_llm_call stored
-    in `_PENDING_CHARS4`. The (real, chars4) baseline lets the next
-    pre_llm_call estimate this-call's real tokens without waiting for a
-    response — softening the previous one-iteration lag."""
-    if not isinstance(usage, dict):
+def _serialise_response(response) -> dict | None:
+    """Best-effort JSON-able dict for a hermes API response object.
+
+    OpenAI-SDK pydantic v2 objects expose `model_dump()`; older shapes use
+    `.dict()` / `__dict__`. Falls back to a `_repr` shape so the dump file
+    always lands with *something*."""
+    if response is None:
+        return None
+    try:
+        if hasattr(response, "model_dump"):
+            return response.model_dump()
+    except Exception:
+        pass
+    try:
+        if hasattr(response, "dict"):
+            return response.dict()
+    except Exception:
+        pass
+    try:
+        return dict(response.__dict__)
+    except Exception:
+        pass
+    return {"_repr": str(response)}
+
+
+def _write_response_dump(session_id: str, response, usage,
+                         finish_reason, model, response_model) -> None:
+    """Write `response_dump_<sid>_<suffix>.json` next to the most recent
+    `request_dump_<sid>_*.json`. The preview pairs by filename suffix."""
+    if not session_id or response is None:
         return
     try:
-        pt = int(usage.get("prompt_tokens"))
-    except (TypeError, ValueError):
-        return
-    if pt <= 0:
-        return
-    sid = session_id or "default"
-    _LAST_PROMPT_TOKENS[sid] = pt
-    chars4 = _PENDING_CHARS4.pop(sid, None)
-    if chars4 is not None and chars4 >= 0:
-        _TOK_BASELINE[sid] = (pt, chars4)
+        sessions = desk_core.desk_home() / "sessions"
+        prefix = f"request_dump_{session_id}_"
+        latest = None
+        latest_mt = -1.0
+        for p in sessions.glob(f"{prefix}*.json"):
+            mt = p.stat().st_mtime
+            if mt > latest_mt:
+                latest = p
+                latest_mt = mt
+        if latest is None:
+            return
+        suffix = latest.name[len(prefix):]   # "<YYYYMMDD>_<HHMMSS>_<rand>.json"
+        out = sessions / f"response_dump_{session_id}_{suffix}"
+        envelope = {
+            "model": model,
+            "response_model": response_model,
+            "finish_reason": finish_reason,
+            "usage": usage,
+            "response": _serialise_response(response) or {},
+        }
+        out.write_text(
+            json.dumps(envelope, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8")
+    except Exception:
+        # Never let preview-machinery break the agent loop.
+        pass
+
+
+def _on_post_api_request(usage=None, session_id="", response=None,
+                         finish_reason=None, model=None, response_model=None,
+                         **_):
+    """Capture the real prompt-token count from each API response, calibrate
+    against the chars/4 estimate the matching pre_llm_call stored in
+    `_PENDING_CHARS4`, AND write a paired response_dump next to the request
+    dump so the desk preview can show the real API response verbatim."""
+    # token + calibration capture (existing behaviour)
+    if isinstance(usage, dict):
+        try:
+            pt = int(usage.get("prompt_tokens"))
+        except (TypeError, ValueError):
+            pt = 0
+        if pt > 0:
+            sid = session_id or "default"
+            _LAST_PROMPT_TOKENS[sid] = pt
+            chars4 = _PENDING_CHARS4.pop(sid, None)
+            if chars4 is not None and chars4 >= 0:
+                _TOK_BASELINE[sid] = (pt, chars4)
+    # response dump (new — fed to the desk-preview "response (JSON)" box)
+    _write_response_dump(session_id, response, usage, finish_reason,
+                         model, response_model)
 
 
 def _on_session_reset(session_id="", **_):

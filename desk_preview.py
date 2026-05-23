@@ -305,6 +305,15 @@ pre  { background: rgba(0,0,0,.04); border: none; border-radius: 4px;
                  font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 .section-foot { font-size: .75rem; color: var(--muted); margin: .4rem 0 .2rem;
                 text-transform: uppercase; letter-spacing: .08em; font-weight: 500; }
+/* Verbatim request/response JSON boxes — one per iteration, foldable. */
+details.json-box { margin: .35rem 0 .35rem 2rem; padding: .15rem .5rem;
+                   border-left: 3px solid var(--rule); }
+details.json-box > summary { font-size: .85rem; color: var(--muted); }
+.json-label { font-weight: 600; color: var(--ink);
+              font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+pre.json { font-size: 12px; max-height: 70vh; line-height: 1.45;
+           background: rgba(0,0,0,.05); }
+@media (prefers-color-scheme: dark) { pre.json { background: rgba(255,255,255,.05); } }
 """
 
 
@@ -376,22 +385,74 @@ def _render_message(idx: int, m: dict, *, mutated: bool = False) -> str:
     return f'<details class="{cls}"><summary>{summary}</summary></details>'
 
 
+def _request_body_json(dump_path: str) -> str:
+    """Return the request body as prettified JSON. Reads the dump file and
+    extracts the `body` payload (what hermes actually sent to the LLM)."""
+    try:
+        d = json.loads(Path(dump_path).read_text(encoding="utf-8"))
+    except Exception as e:
+        return f"(failed to read {dump_path}: {e})"
+    body = d.get("request", {}).get("body", d) if isinstance(d, dict) else d
+    try:
+        return json.dumps(body, indent=2, ensure_ascii=False, default=str)
+    except Exception as e:
+        return f"(failed to render JSON: {e})"
+
+
+def _response_json(dump_path: str, next_dump: dict | None,
+                   cur_msgs: list[dict]) -> tuple[str, bool]:
+    """Return (prettified-JSON, is_synthesised).
+    Prefers a paired response_dump on disk (written by the post_api_request
+    hook); falls back to synthesising from the next iteration's added
+    messages when no response_dump exists.
+    """
+    p = Path(dump_path)
+    base = p.name
+    if base.startswith("request_dump_"):
+        resp_path = p.parent / ("response_dump_" + base[len("request_dump_"):])
+        if resp_path.exists():
+            try:
+                d = json.loads(resp_path.read_text(encoding="utf-8"))
+                return (json.dumps(d, indent=2, ensure_ascii=False,
+                                   default=str), False)
+            except Exception as e:
+                return (f"(failed to read response_dump: {e})", False)
+    if next_dump is None:
+        synth = {
+            "_synthesised": True,
+            "_note": "no next iteration yet — this is the latest dump",
+        }
+        return (json.dumps(synth, indent=2, ensure_ascii=False), True)
+    next_msgs = _msgs(next_dump)
+    added, _ = _new_msg_indices(cur_msgs, next_msgs)
+    synth = {
+        "_synthesised": True,
+        "_note": ("derived from the next iteration's added messages — "
+                  "the real API response (id, usage, finish_reason) requires "
+                  "the post_api_request hook to write a paired response_dump"),
+        "added_messages": [next_msgs[i] for i in added],
+    }
+    return (json.dumps(synth, indent=2, ensure_ascii=False, default=str), True)
+
+
 def _render_iteration(turn_idx: int, iter_idx: int, *, prev_msgs: list[dict],
-                      cur_msgs: list[dict], open_default: bool = False) -> str:
+                      cur_msgs: list[dict], dump_path: str = "",
+                      next_dump: dict | None = None,
+                      open_default: bool = False) -> str:
     chars = sum(_msg_chars(m) for m in cur_msgs)
     toks = chars // 4
     band = _band(toks)
     archived_count = sum(1 for m in cur_msgs
                          if m.get("role") == "tool" and _is_archived(_cstr(m)))
-    live_blocks = sum(1 for m in cur_msgs
+    live_papers = sum(1 for m in cur_msgs
                       if m.get("role") == "tool" and _paper_id(_cstr(m))
                       and not _is_archived(_cstr(m)))
     added, mutated = _new_msg_indices(prev_msgs, cur_msgs)
 
     # Compact one-line summary: «1.2  clean  14,818 tok · 4 msgs · +2 new»
     meta_bits = [f"{toks:,} tok", f"{len(cur_msgs)} msgs"]
-    if live_blocks:
-        meta_bits.append(f"{live_blocks} live")
+    if live_papers:
+        meta_bits.append(f"{live_papers} live")
     if archived_count:
         meta_bits.append(f"{archived_count} archived")
     if added:
@@ -416,13 +477,30 @@ def _render_iteration(turn_idx: int, iter_idx: int, *, prev_msgs: list[dict],
                  '(no message-level changes — same prompt as prior iteration)'
                  '</div>')
 
+    # Verbatim request + response JSON boxes — closed by default, foldable.
+    if dump_path:
+        req_json = _request_body_json(dump_path)
+        resp_json, synth = _response_json(dump_path, next_dump, cur_msgs)
+        body += ('<details class="json-box"><summary>'
+                 f'<span class="json-label">request body (JSON)</span>'
+                 f'<span class="iter-meta">{len(req_json):,} chars</span>'
+                 f'</summary><pre class="json">{_h(req_json)}</pre></details>')
+        resp_tag = ("synthesised — pending response_dump"
+                    if synth else "from response_dump")
+        body += ('<details class="json-box"><summary>'
+                 f'<span class="json-label">response (JSON)</span>'
+                 f'<span class="iter-meta">{resp_tag} · '
+                 f'{len(resp_json):,} chars</span>'
+                 f'</summary><pre class="json">{_h(resp_json)}</pre></details>')
+
     open_attr = " open" if open_default else ""
     return f'<details class="iter"{open_attr}><summary>{summary}</summary>{body}</details>'
 
 
 def _render_turn(turn_idx: int, dumps: list[tuple[str, dict]],
                  *, initial_prev_msgs: list[dict] | None = None,
-                 open_default: bool = False) -> tuple[str, list[dict]]:
+                 open_default: bool = False,
+                 sentinel_next: dict | None = None) -> tuple[str, list[dict]]:
     if not dumps:
         return ""
     first_msgs = _msgs(dumps[0][1])
@@ -460,12 +538,20 @@ def _render_turn(turn_idx: int, dumps: list[tuple[str, dict]],
     body = ""
     prev_msgs: list[dict] = list(initial_prev_msgs or [])
     n = len(dumps)
-    for k, (_p, d) in enumerate(dumps, start=1):
+    for k, (p_path, d) in enumerate(dumps, start=1):
         cur_msgs = _msgs(d)
+        if k < n:
+            next_dump = dumps[k][1]
+        else:
+            # last iter of this turn — use next turn's first dump as the
+            # synthesised-response source (so its added assistant message
+            # appears in this iter's response box). None if last turn.
+            next_dump = sentinel_next
         # Auto-open the LAST iteration of the LAST turn — it's the live state.
         iter_open = open_default and (k == n)
         body += _render_iteration(turn_idx, k,
                                   prev_msgs=prev_msgs, cur_msgs=cur_msgs,
+                                  dump_path=p_path, next_dump=next_dump,
                                   open_default=iter_open)
         prev_msgs = cur_msgs
 
@@ -527,13 +613,21 @@ def render_session(sid: str, *,
     # folded; the user opens them on demand. Thread prev_msgs across turn
     # boundaries so each turn's first iter shows only the genuinely new
     # messages (the new user prompt), not the entire cumulative history.
+    # Also stitch the LAST iteration of turn N to the FIRST dump of turn N+1
+    # so its synthesised response can use the next-turn first iteration's
+    # added messages (the assistant reply that closed turn N).
     n_turns = len(turns)
     body_parts: list[str] = []
     prev_msgs: list[dict] = []
     for i, t in enumerate(turns):
         is_last = (i + 1 == n_turns)
+        # For the last iter of this turn, the synthesised response can be
+        # pulled from the FIRST dump of the next turn (where the closing
+        # assistant message landed). Last turn has no next → sentinel=None.
+        sentinel = turns[i + 1][0][1] if (not is_last and turns[i + 1]) else None
         h_str, prev_msgs = _render_turn(
-            i + 1, t, initial_prev_msgs=prev_msgs, open_default=is_last)
+            i + 1, t, initial_prev_msgs=prev_msgs, open_default=is_last,
+            sentinel_next=sentinel)
         body_parts.append(h_str)
     body = "".join(body_parts)
     h = head + summary + body + "</body></html>"
