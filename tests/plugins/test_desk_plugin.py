@@ -44,9 +44,9 @@ def test_register_wires_every_desk_hook(desk):
 
 def test_stamp_adds_block_id(desk):
     out = desk._stamp(result="a tool result", session_id="s1")
-    assert out.startswith("[b1] ")
+    assert out.startswith("[p1] ")
     # already-stamped results are left alone
-    assert desk._stamp(result="[b9] already", session_id="s1") is None
+    assert desk._stamp(result="[p9] already", session_id="s1") is None
     # no session id -> no stamp
     assert desk._stamp(result="x", session_id="") is None
 
@@ -56,11 +56,11 @@ def test_pre_llm_call_emits_note_at_notice_level(desk):
     desk._on_post_api_request(
         usage={"prompt_tokens": int(desk_core.EFFECTIVE_CTX * 0.85)},
         session_id="s1")
-    msgs = [{"role": "tool", "content": "[b1] r1"}]
+    msgs = [{"role": "tool", "content": "[p1] r1"}]
     out = desk._on_pre_llm_call(session_id="s1", conversation_history=msgs)
     assert out is not None
     assert "filling up" in out["context"]
-    assert "ids on the desk: b1" in out["context"]
+    assert "papers on the desk: p1" in out["context"]
 
 
 def test_pre_llm_call_calm_returns_short_state_note(desk):
@@ -75,7 +75,7 @@ def test_pre_llm_call_calm_returns_short_state_note(desk):
     assert out is not None
     assert "clean" in out["context"].lower()
     # clean note must NOT carry the id-listing appendix (desk is fine)
-    assert "ids on the desk" not in out["context"]
+    assert "papers on the desk" not in out["context"]
     assert "no archivable" not in out["context"]
 
 
@@ -94,7 +94,7 @@ def test_forced_level_restricts_tools(desk, monkeypatch):
 def test_rollback_diagnostic_logs_on_large_drop(desk, tmp_path):
     big = [{"role": "tool", "content": f"[b{i}] r"} for i in range(20)]
     desk._on_pre_api_request(session_id="s4", request_messages=big)
-    small = [{"role": "tool", "content": "[b1] r"}]
+    small = [{"role": "tool", "content": "[p1] r"}]
     desk._on_pre_api_request(session_id="s4", request_messages=small)
     log = tmp_path / "context-trace" / "rollbacks.log"
     assert log.exists()
@@ -126,19 +126,19 @@ def _set_level(tmp_path, sid, lvl):
 def test_pre_tool_call_blocks_shred_at_calm(desk, tmp_path):
     _set_level(tmp_path, "s6", "clean")
     r = desk._on_pre_tool_call(tool_name="shred", session_id="s6")
-    assert isinstance(r, dict) and r.get("action") == "block"
+    assert isinstance(r, dict) and r.get("action") == "paper"
     assert "shred is unavailable" in r["message"]
     assert "clean" in r["message"]
     # the denial must explain the band may have dropped since the model saw
     # a higher-band note (the sync issue) — so the model doesn't read the
-    # block as a contradiction
+    # paper as a contradiction
     assert "dropped" in r["message"].lower() or "since" in r["message"].lower()
 
 
 def test_pre_tool_call_blocks_shred_at_notice(desk, tmp_path):
     _set_level(tmp_path, "s7", "notice")
     r = desk._on_pre_tool_call(tool_name="shred", session_id="s7")
-    assert isinstance(r, dict) and r.get("action") == "block"
+    assert isinstance(r, dict) and r.get("action") == "paper"
     assert "notice" in r["message"]
 
 
@@ -162,7 +162,7 @@ def test_pre_tool_call_ignores_non_shred_tools(desk, tmp_path):
 def test_pre_tool_call_defaults_to_calm_when_no_level_file(desk):
     # fresh session with no level file → treat as clean → shred blocked
     r = desk._on_pre_tool_call(tool_name="shred", session_id="never-seen")
-    assert isinstance(r, dict) and r.get("action") == "block"
+    assert isinstance(r, dict) and r.get("action") == "paper"
 
 
 def test_register_now_includes_pre_tool_call(desk):
@@ -179,15 +179,15 @@ def test_pre_llm_call_note_lists_live_ids_only(desk):
         usage={"prompt_tokens": int(desk_core.EFFECTIVE_CTX * 0.85)},
         session_id="ids-live")
     msgs = [
-        {"role": "tool", "content": "[b10] live data"},
-        {"role": "tool", "content": "[b11] (archived: 9000 chars moved off the desk — recall b11 to bring it back)"},
-        {"role": "tool", "content": "[b12] another live"},
+        {"role": "tool", "content": "[p10] live data"},
+        {"role": "tool", "content": "[p11] (archived: 9000 chars moved off the desk — recall p11 to bring it back)"},
+        {"role": "tool", "content": "[p12] another live"},
     ]
     out = desk._on_pre_llm_call(session_id="ids-live", conversation_history=msgs)
     assert out is not None
-    # b11 is an archived placeholder and must NOT appear in the listing
-    assert "ids on the desk: b10, b12" in out["context"]
-    assert "b11" not in out["context"]
+    # p11 is an archived placeholder and must NOT appear in the listing
+    assert "papers on the desk: p10, p12" in out["context"]
+    assert "p11" not in out["context"]
 
 
 # --- calibration softens the level lag ------------------------------------
@@ -234,18 +234,18 @@ def test_note_when_no_live_blocks_says_fill_is_system_side(desk):
     so explicitly — so the model tells the user instead of grasping at
     non-existent ids (the v3 confusion observed at forced)."""
     import desk_core
-    # push to forced; conversation has only placeholders + non-block messages
+    # push to forced; conversation has only placeholders + non-paper messages
     desk._on_post_api_request(
         usage={"prompt_tokens": int(desk_core.EFFECTIVE_CTX * 1.10)},
         session_id="empty")
     msgs = [
         {"role": "user", "content": "x"},
-        {"role": "tool", "content": "[b20] (archived: 9000 chars moved off the desk — recall b20 to bring it back)"},
-        {"role": "tool", "content": "[b21] (archived: 4500 chars moved off the desk — recall b21 to bring it back)"},
+        {"role": "tool", "content": "[p20] (archived: 9000 chars moved off the desk — recall p20 to bring it back)"},
+        {"role": "tool", "content": "[p21] (archived: 4500 chars moved off the desk — recall p21 to bring it back)"},
     ]
     out = desk._on_pre_llm_call(session_id="empty", conversation_history=msgs)
     assert out is not None
-    assert "no archivable blocks remain" in out["context"]
+    assert "no archivable papers remain" in out["context"]
     assert "system-side" in out["context"]
     assert "tell the user" in out["context"]
 

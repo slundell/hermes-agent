@@ -44,71 +44,71 @@ def test_update_model_pins_threshold_to_window(engine):
 def test_compress_is_a_fail_loud_noop(engine, tmp_path):
     msgs = [
         {"role": "user", "content": "hi"},
-        _tool_msg("b1", "small"),
-        _tool_msg("b2", "X" * 5000, tool_call_id="tc2"),
+        _tool_msg("p1", "small"),
+        _tool_msg("p2", "X" * 5000, tool_call_id="tc2"),
     ]
     out = engine.compress(msgs)
     # returns the list unchanged — no synchronous reduction
     assert out is msgs
     assert len(out) == 3
-    # loud diagnostic written, naming the largest block
+    # loud diagnostic written, naming the largest paper
     log = tmp_path / "desk" / "overflow.log"
     assert log.exists()
-    assert "b2" in log.read_text(encoding="utf-8")
+    assert "p2" in log.read_text(encoding="utf-8")
 
 
 def test_archive_then_recall_round_trips(engine):
-    msgs = [_tool_msg("b1", "the original content")]
+    msgs = [_tool_msg("p1", "the original content")]
     r = json.loads(engine.handle_tool_call(
         "archive",
-        {"target": "b1", "description": "test content for round-trip"},
+        {"target": "p1", "description": "test content for round-trip"},
         messages=msgs))
-    assert r["result"] == "archived b1"
+    assert r["result"] == "archived p1"
     assert "(archived:" in msgs[0]["content"]
     # the description appears in the placeholder so future iterations can
-    # tell what the block was without recalling it for inspection
+    # tell what the paper was without recalling it for inspection
     assert "test content for round-trip" in msgs[0]["content"]
-    r = json.loads(engine.handle_tool_call("recall", {"target": "b1"}, messages=msgs))
-    assert r["result"] == "recalled b1 onto the desk"
-    assert msgs[0]["content"] == "[b1] the original content"
+    r = json.loads(engine.handle_tool_call("recall", {"target": "p1"}, messages=msgs))
+    assert r["result"] == "recalled p1 onto the desk"
+    assert msgs[0]["content"] == "[p1] the original content"
 
 
 def test_archive_requires_description(engine):
-    msgs = [_tool_msg("b1", "some content")]
+    msgs = [_tool_msg("p1", "some content")]
     # no description → reject before writing the archive file
     r = json.loads(engine.handle_tool_call(
-        "archive", {"target": "b1"}, messages=msgs))
+        "archive", {"target": "p1"}, messages=msgs))
     assert "description is required" in r.get("error", "")
     # empty/whitespace description also rejected
     r = json.loads(engine.handle_tool_call(
-        "archive", {"target": "b1", "description": "   "}, messages=msgs))
+        "archive", {"target": "p1", "description": "   "}, messages=msgs))
     assert "description is required" in r.get("error", "")
-    # block was NOT archived (placeholder absent, content untouched)
+    # paper was NOT archived (placeholder absent, content untouched)
     assert "(archived:" not in msgs[0]["content"]
 
 
 def test_archive_placeholder_format(engine):
-    msgs = [_tool_msg("b1", "X" * 2500)]
+    msgs = [_tool_msg("p1", "X" * 2500)]
     r = json.loads(engine.handle_tool_call(
         "archive",
-        {"target": "b1", "description": "run_agent.py:1-1000 — orientation"},
+        {"target": "p1", "description": "run_agent.py:1-1000 — orientation"},
         messages=msgs))
-    assert r["result"] == "archived b1"
+    assert r["result"] == "archived p1"
     placeholder = msgs[0]["content"]
-    # format: [b1] (archived: <desc> — <chars> chars off-desk; recall b1 to restore)
-    assert placeholder.startswith("[b1] (archived: run_agent.py:1-1000 — orientation")
+    # format: [p1] (archived: <desc> — <chars> chars off-desk; recall p1 to restore)
+    assert placeholder.startswith("[p1] (archived: run_agent.py:1-1000 — orientation")
     # size is measured in tokens now (via desk_core.token_count — chars/4
     # fallback when no DESK_TOKENIZER_URL configured)
     assert "tokens off-desk" in placeholder
-    assert "recall b1 to restore" in placeholder
+    assert "recall p1 to restore" in placeholder
 
 
 def test_archive_description_is_capped(engine):
-    msgs = [_tool_msg("b1", "content")]
+    msgs = [_tool_msg("p1", "content")]
     long_desc = "x" * 1000
     r = json.loads(engine.handle_tool_call(
-        "archive", {"target": "b1", "description": long_desc}, messages=msgs))
-    assert r["result"] == "archived b1"
+        "archive", {"target": "p1", "description": long_desc}, messages=msgs))
+    assert r["result"] == "archived p1"
     # the placeholder caps the description at 150 chars
     placeholder = msgs[0]["content"]
     assert "x" * 150 in placeholder
@@ -119,11 +119,11 @@ def test_shred_removes_block_and_orphan_tool_call(engine):
     msgs = [
         {"role": "assistant", "content": "", "tool_calls": [
             {"id": "tc1", "function": {"name": "x", "arguments": "{}"}}]},
-        _tool_msg("b1", "junk", tool_call_id="tc1"),
+        _tool_msg("p1", "junk", tool_call_id="tc1"),
     ]
-    r = json.loads(engine.handle_tool_call("shred", {"target": "b1"}, messages=msgs))
-    assert "shredded b1" in r["result"]
-    assert msgs == []  # block + its now-empty assistant turn both gone
+    r = json.loads(engine.handle_tool_call("shred", {"target": "p1"}, messages=msgs))
+    assert "shredded p1" in r["result"]
+    assert msgs == []  # paper + its now-empty assistant turn both gone
 
 
 def test_unknown_tool_rejected(engine):
@@ -137,8 +137,8 @@ def test_missing_target_gives_clear_error(engine):
 
 
 def test_recall_of_never_archived_block_errors(engine):
-    msgs = [_tool_msg("b1", "live content")]
-    r = json.loads(engine.handle_tool_call("recall", {"target": "b1"}, messages=msgs))
+    msgs = [_tool_msg("p1", "live content")]
+    r = json.loads(engine.handle_tool_call("recall", {"target": "p1"}, messages=msgs))
     assert "not in the archive" in r["error"]
 
 
@@ -146,16 +146,16 @@ def test_shred_block_without_paired_tool_call(engine):
     # an assistant turn that has no tool_calls must be left untouched by shred
     msgs = [
         {"role": "assistant", "content": "just text, no tool calls"},
-        _tool_msg("b1", "junk", tool_call_id="tcX"),
+        _tool_msg("p1", "junk", tool_call_id="tcX"),
     ]
-    r = json.loads(engine.handle_tool_call("shred", {"target": "b1"}, messages=msgs))
-    assert "shredded b1" in r["result"]
+    r = json.loads(engine.handle_tool_call("shred", {"target": "p1"}, messages=msgs))
+    assert "shredded p1" in r["result"]
     assert msgs == [{"role": "assistant", "content": "just text, no tool calls"}]
 
 
 def test_tool_descriptions_explain_system_side_overhead(engine):
     schemas = {s["name"]: s for s in engine.get_tool_schemas()}
-    # archive should explain that only [bN] blocks are archivable and that
+    # archive should explain that only [bN] papers are archivable and that
     # system overhead is not on the desk
     arch_desc = schemas["archive"]["description"]
     assert "Only [bN]" in arch_desc

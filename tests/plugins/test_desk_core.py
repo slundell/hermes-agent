@@ -15,10 +15,10 @@ def dc(monkeypatch, tmp_path):
 
 
 def test_block_id_parses_bracketed_prefix(dc):
-    assert dc.block_id("[b37] some tool result") == "b37"
-    assert dc.block_id("  [b1] leading space ok") == "b1"
-    assert dc.block_id("no id here") is None
-    assert dc.block_id("[archived] not a block id") is None
+    assert dc.paper_id("[p37] some tool result") == "p37"
+    assert dc.paper_id("  [p1] leading space ok") == "p1"
+    assert dc.paper_id("no id here") is None
+    assert dc.paper_id("[archived] not a paper id") is None
 
 
 def test_content_str_flattens_list_and_string(dc):
@@ -28,44 +28,44 @@ def test_content_str_flattens_list_and_string(dc):
 
 
 def test_is_stamped(dc):
-    assert dc.is_stamped("[b9] x") is True
+    assert dc.is_stamped("[p9] x") is True
     assert dc.is_stamped("x") is False
 
 
 def test_block_ids_on_desk(dc):
     msgs = [
-        {"role": "tool", "content": "[b3] r3"},
-        {"role": "assistant", "content": "[b99] not a tool — ignored"},
-        {"role": "tool", "content": "[b1] r1"},
+        {"role": "tool", "content": "[p3] r3"},
+        {"role": "assistant", "content": "[p99] not a tool — ignored"},
+        {"role": "tool", "content": "[p1] r1"},
         {"role": "tool", "content": "no id"},
     ]
-    assert dc.block_ids_on_desk(msgs) == [1, 3]
+    assert dc.paper_ids_on_desk(msgs) == [1, 3]
 
 
 def test_live_block_ids_on_desk_excludes_placeholders(dc):
     msgs = [
-        {"role": "tool", "content": "[b5] live content"},
-        {"role": "tool", "content": "[b6] (archived: 1234 chars moved off the desk — recall b6 to bring it back)"},
-        {"role": "tool", "content": "[b7] another live block"},
-        {"role": "tool", "content": "[b8] (archived: 99 chars moved off the desk — recall b8 to bring it back)"},
+        {"role": "tool", "content": "[p5] live content"},
+        {"role": "tool", "content": "[p6] (archived: 1234 chars moved off the desk — recall p6 to bring it back)"},
+        {"role": "tool", "content": "[p7] another live paper"},
+        {"role": "tool", "content": "[p8] (archived: 99 chars moved off the desk — recall p8 to bring it back)"},
     ]
     # full view (used by the rollback diagnostic) sees everything
-    assert dc.block_ids_on_desk(msgs) == [5, 6, 7, 8]
+    assert dc.paper_ids_on_desk(msgs) == [5, 6, 7, 8]
     # live view (used by the desk-note's "ids on the desk" listing) hides
     # placeholders so the model isn't misled into treating them as slots
-    assert dc.live_block_ids_on_desk(msgs) == [5, 7]
+    assert dc.live_paper_ids_on_desk(msgs) == [5, 7]
 
 
 def test_collapse_ranges(dc):
-    assert dc.collapse_ranges([1, 2, 3, 5, 6]) == "b1–b3, b5, b6"
-    assert dc.collapse_ranges([4]) == "b4"
+    assert dc.collapse_ranges([1, 2, 3, 5, 6]) == "p1–p3, p5, p6"
+    assert dc.collapse_ranges([4]) == "p4"
     assert dc.collapse_ranges([]) == ""
 
 
 def test_next_block_id_is_monotonic(dc):
-    first = dc.next_block_id()
-    assert dc.next_block_id() == first + 1
-    assert dc.next_block_id() == first + 2
+    first = dc.next_paper_id()
+    assert dc.next_paper_id() == first + 1
+    assert dc.next_paper_id() == first + 2
 
 
 def test_effective_ctx_is_window_minus_headroom(dc):
@@ -159,12 +159,12 @@ def test_token_count_falls_back_on_endpoint_failure(dc, monkeypatch):
 
 
 def test_log_overflow_writes_loud_diagnostic(dc, tmp_path):
-    dc.log_overflow(("b42", 123456), n_messages=80)
+    dc.log_overflow(("p42", 123456), n_messages=80)
     log = tmp_path / "desk" / "overflow.log"
     assert log.exists()
     text = log.read_text(encoding="utf-8")
     assert "DESK OVERFLOW" in text
-    assert "b42" in text
+    assert "p42" in text
 
 
 def test_fill_fraction(dc):
@@ -173,7 +173,7 @@ def test_fill_fraction(dc):
 
 
 def test_log_overflow_handles_none_offending(dc, tmp_path):
-    # a real overflow may have no identified block — must not crash
+    # a real overflow may have no identified paper — must not crash
     dc.log_overflow(None, n_messages=12)
     log = tmp_path / "desk" / "overflow.log"
     assert log.exists()
@@ -181,11 +181,11 @@ def test_log_overflow_handles_none_offending(dc, tmp_path):
 
 
 def test_next_block_id_returns_value_even_if_persist_fails(dc, monkeypatch):
-    first = dc.next_block_id()
+    first = dc.next_paper_id()
     # simulate the counter file write failing
     from pathlib import Path
     monkeypatch.setattr(
         Path, "write_text",
         lambda *a, **k: (_ for _ in ()).throw(OSError("disk full")))
     # the incremented value is still returned (in-memory), write failure is logged
-    assert dc.next_block_id() == first + 1
+    assert dc.next_paper_id() == first + 1

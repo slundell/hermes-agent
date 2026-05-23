@@ -1,7 +1,7 @@
 """desk — model-driven context-tidying ContextEngine.
 
 The desk is the model's working context. The model tidies it — archive /
-recall / shred, addressed by [bN] block id — instead of leaning on opaque
+recall / shred, addressed by [bN] paper id — instead of leaning on opaque
 compaction. ("tidy" is the desk verb; Hermes's built-in `curator` curates
 *skills*, a separate thing — desk = context, curator = skills.)
 
@@ -18,7 +18,7 @@ no synchronous compaction:
                        existing "cannot compress further" path then aborts the
                        turn with the session preserved.
 
-Shared primitives (block-id regex, state paths, watermark math) live in the
+Shared primitives (paper-id regex, state paths, watermark math) live in the
 top-level `desk_core` module. Select with `context.engine: desk` in
 config.yaml.
 """
@@ -37,16 +37,16 @@ _ARCHIVED_MARK = "(archived:"
 _ARCHIVE_TOOL = {
     "name": "archive",
     "description": (
-        "Move a spent block off the desk into your archive. The block is kept "
+        "Move a spent paper off the desk into your archive. The paper is kept "
         "whole and safe and can be brought back any time with recall — "
-        "archiving never loses anything, it only moves the block aside. A "
+        "archiving never loses anything, it only moves the paper aside. A "
         "one-line placeholder carrying your `description` is left in its "
         "place, so you (or a future iteration) can see what's archived at a "
-        "glance without recalling it. Use on bulky spent tool-result blocks. "
-        "Only [bN]-stamped tool-result blocks are on the desk and can be "
+        "glance without recalling it. Use on bulky spent tool-result papers. "
+        "Only [bN]-stamped tool-result papers are on the desk and can be "
         "archived. System overhead — system prompt, tool schemas, memory, "
         "project context (AGENTS.md, etc.) — is *not* on the desk: it adds "
-        "to the fill but cannot be archived. When no [bN] blocks remain on "
+        "to the fill but cannot be archived. When no [bN] papers remain on "
         "the desk and the desk is still full, that fill is system-side and "
         "you should tell the user rather than keep archiving."),
     "parameters": {
@@ -54,18 +54,18 @@ _ARCHIVE_TOOL = {
         "properties": {
             "target": {
                 "type": "string",
-                "description": "The id of the block to archive — bare (b37) "
-                               "or bracketed ([b37]); both accepted.",
+                "description": "The id of the paper to archive — bare (p37) "
+                               "or bracketed ([p37]); both accepted.",
             },
             "description": {
                 "type": "string",
                 "description": (
                     "REQUIRED. A brief, specific one-line label of what this "
-                    "block contains, e.g. 'run_agent.py:1-1000 — orientation', "
+                    "paper contains, e.g. 'run_agent.py:1-1000 — orientation', "
                     "'terminal: pip install output', or 'search: 17 results for "
                     "OAuth refresh'. Appears in the placeholder left on the "
                     "desk — without it future iterations have to recall the "
-                    "block just to see what it was, growing the desk again. "
+                    "paper just to see what it was, growing the desk again. "
                     "Keep it short (<150 chars)."),
             },
         },
@@ -74,7 +74,7 @@ _ARCHIVE_TOOL = {
 }
 _RECALL_TOOL = {
     "name": "recall",
-    "description": "Bring an archived block back onto the desk, verbatim, by its id. "
+    "description": "Bring an archived paper back onto the desk, verbatim, by its id. "
                    "Recall *grows* the desk — only use it when you need the original "
                    "content again, not to inspect the desk state.",
     "parameters": {
@@ -82,7 +82,7 @@ _RECALL_TOOL = {
         "properties": {
             "target": {
                 "type": "string",
-                "description": "The id of the archived block to bring back.",
+                "description": "The id of the archived paper to bring back.",
             },
         },
         "required": ["target"],
@@ -91,8 +91,8 @@ _RECALL_TOOL = {
 _SHRED_TOOL = {
     "name": "shred",
     "description": (
-        "Destroy a block for good — no archive, no way back. Rare and "
-        "irreversible: use only for a block that is plainly worthless (an empty "
+        "Destroy a paper for good — no archive, no way back. Rare and "
+        "irreversible: use only for a paper that is plainly worthless (an empty "
         "result, a failed or timed-out command, a search that found nothing). "
         "If unsure, archive instead. Only available at the urgent and forced "
         "watermark bands; denied at clean and notice (use archive)."),
@@ -101,8 +101,8 @@ _SHRED_TOOL = {
         "properties": {
             "target": {
                 "type": "string",
-                "description": "The id of the block to destroy — bare (b37) or "
-                               "bracketed ([b37]); both accepted.",
+                "description": "The id of the paper to destroy — bare (p37) or "
+                               "bracketed ([p37]); both accepted.",
             },
         },
         "required": ["target"],
@@ -112,7 +112,7 @@ _SHRED_TOOL = {
 
 def _norm(target) -> str:
     t = str(target or "").strip().strip("[]").strip()
-    return t if t.startswith("b") else f"b{t}"
+    return t if t.startswith("p") else f"p{t}"
 
 
 class DeskEngine(ContextEngine):
@@ -183,7 +183,7 @@ class DeskEngine(ContextEngine):
                 continue
             c = desk_core.content_str(m)
             if biggest is None or len(c) > biggest[1]:
-                biggest = (desk_core.block_id(c) or "?", len(c))
+                biggest = (desk_core.paper_id(c) or "?", len(c))
         return biggest
 
     def on_session_start(self, session_id, **kwargs) -> None:
@@ -193,11 +193,11 @@ class DeskEngine(ContextEngine):
     def get_tool_schemas(self):
         return [_ARCHIVE_TOOL, _RECALL_TOOL, _SHRED_TOOL]
 
-    def _find_block(self, messages, target):
+    def _find_paper(self, messages, target):
         for m in messages or []:
             if not isinstance(m, dict) or m.get("role") != "tool":
                 continue
-            if desk_core.block_id(desk_core.content_str(m)) == target:
+            if desk_core.paper_id(desk_core.content_str(m)) == target:
                 return m
         return None
 
@@ -211,13 +211,13 @@ class DeskEngine(ContextEngine):
         args = args if isinstance(args, dict) else {}
         raw_target = args.get("target")
         if not str(raw_target or "").strip():
-            return json.dumps({"error": "target is required — give the block id, e.g. b37"})
+            return json.dumps({"error": "target is required — give the paper id, e.g. p37"})
         target = _norm(raw_target)
 
-        block = self._find_block(messages, target)
-        if block is None:
-            return json.dumps({"error": f"no block {target} on the desk"})
-        content = desk_core.content_str(block)
+        paper = self._find_paper(messages, target)
+        if paper is None:
+            return json.dumps({"error": f"no paper {target} on the desk"})
+        content = desk_core.content_str(paper)
 
         if name == "archive":
             if _ARCHIVED_MARK in content:
@@ -229,10 +229,10 @@ class DeskEngine(ContextEngine):
             if not desc:
                 return json.dumps({"error":
                     "description is required — a brief one-line label of what "
-                    "this block contains, e.g. 'run_agent.py:1-1000 — "
+                    "this paper contains, e.g. 'run_agent.py:1-1000 — "
                     "orientation'. Without it the placeholder on the desk "
                     "carries no identity and a later iteration has to recall "
-                    "the block just to see what it was."})
+                    "the paper just to see what it was."})
             desc = desc[:150]  # cap to keep placeholders compact
             try:
                 (desk_core.archive_dir() / f"{target}.txt").write_text(
@@ -240,7 +240,7 @@ class DeskEngine(ContextEngine):
             except Exception as e:
                 return json.dumps({"error": f"archive write failed: {e}"})
             tok = desk_core.token_count(content)
-            block["content"] = (
+            paper["content"] = (
                 f"[{target}] {_ARCHIVED_MARK} {desc} — ~{tok:,} tokens "
                 f"off-desk; recall {target} to restore)")
             return json.dumps({"result": f"archived {target}"})
@@ -250,19 +250,19 @@ class DeskEngine(ContextEngine):
             if not f.exists():
                 return json.dumps({"error": f"{target} is not in the archive"})
             try:
-                block["content"] = f.read_text(encoding="utf-8")
+                paper["content"] = f.read_text(encoding="utf-8")
             except Exception as e:
                 return json.dumps({"error": f"recall read failed: {e}"})
             return json.dumps({"result": f"recalled {target} onto the desk"})
 
         if name == "shred":
-            # destroy the block and its paired assistant tool-call — orphan-safe.
-            # If the block was previously archived, its desk-archive/bN.txt file
-            # is left as a harmless orphan: block ids are globally monotonic and
+            # destroy the paper and its paired assistant tool-call — orphan-safe.
+            # If the paper was previously archived, its desk-archive/bN.txt file
+            # is left as a harmless orphan: paper ids are globally monotonic and
             # never reused, so a stale archive file can never be mis-recalled.
-            tcid = block.get("tool_call_id")
+            tcid = paper.get("tool_call_id")
             try:
-                messages.remove(block)
+                messages.remove(paper)
             except ValueError:
                 pass
             for m in list(messages):

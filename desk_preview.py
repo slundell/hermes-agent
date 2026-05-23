@@ -35,7 +35,7 @@ import re
 from datetime import datetime
 from pathlib import Path
 
-BID = re.compile(r"^\s*\[(b\d+)\]")
+PID = re.compile(r"^\s*\[(p\d+)\]")
 
 # --- thresholds (read same env as desk_core in the pod) -------------------
 DESK_MODEL_MAX_CTX = int(os.environ.get("DESK_MODEL_MAX_CTX", "262144") or 262144)
@@ -65,8 +65,8 @@ def _cstr(m: dict) -> str:
     return c or ""
 
 
-def _block_id(s: str) -> str | None:
-    m = BID.match(s or "")
+def _paper_id(s: str) -> str | None:
+    m = PID.match(s or "")
     return m.group(1) if m else None
 
 
@@ -90,7 +90,7 @@ def _detect_desk_note(content: str) -> str | None:
 
 
 def _classify_tool(content: str) -> tuple[str, str]:
-    c = BID.sub("", content).strip()
+    c = PID.sub("", content).strip()
     try:
         o = json.loads(c)
     except Exception:
@@ -277,7 +277,7 @@ details.msg > summary { font-size: .88rem; }
        font-variant-numeric: tabular-nums;
        font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
 /* Band pill — small coloured chip used in iter/turn headers. */
-.band { display: inline-block; padding: .05rem .45rem; border-radius: 10px;
+.band { display: inline-paper; padding: .05rem .45rem; border-radius: 10px;
         font-size: .72rem; font-weight: 600; text-transform: lowercase;
         letter-spacing: .03em; color: #fff; }
 .band.clean   { background: var(--b-clean); }
@@ -313,7 +313,7 @@ def _render_message(idx: int, m: dict, *, mutated: bool = False) -> str:
     talker = {"assistant": "agent"}.get(role, role)
     content = _cstr(m)
     chars = _msg_chars(m)
-    bid = _block_id(content) if role == "tool" else None
+    bid = _paper_id(content) if role == "tool" else None
     archived = _is_archived(content) if bid else False
     open_attr = ""
 
@@ -384,7 +384,7 @@ def _render_iteration(turn_idx: int, iter_idx: int, *, prev_msgs: list[dict],
     archived_count = sum(1 for m in cur_msgs
                          if m.get("role") == "tool" and _is_archived(_cstr(m)))
     live_blocks = sum(1 for m in cur_msgs
-                      if m.get("role") == "tool" and _block_id(_cstr(m))
+                      if m.get("role") == "tool" and _paper_id(_cstr(m))
                       and not _is_archived(_cstr(m)))
     added, mutated = _new_msg_indices(prev_msgs, cur_msgs)
 
@@ -487,7 +487,7 @@ def _render_session_summary(sid: str, dumps: list[tuple[str, dict]],
     r = tidy.get("recall", 0)
     s = tidy.get("shred", 0)
     live_blocks = sum(1 for m in last_msgs
-                      if m.get("role") == "tool" and _block_id(_cstr(m))
+                      if m.get("role") == "tool" and _paper_id(_cstr(m))
                       and not _is_archived(_cstr(m)))
     archived = sum(1 for m in last_msgs
                    if m.get("role") == "tool" and _is_archived(_cstr(m)))
@@ -497,7 +497,7 @@ def _render_session_summary(sid: str, dumps: list[tuple[str, dict]],
         ("end ~tok", f"{last_toks:,}"),
         ("end band", f'<span class="band {band}">{band}</span>'),
         ("tidy a/r/s", f"{a}/{r}/{s}"),
-        ("blocks", f"{live_blocks} live · {archived} archived"),
+        ("papers", f"{live_blocks} live · {archived} archived"),
     ]
     return ('<div class="session-stats">' +
             "".join(f'<span class="kv"><span class="k">{_h(k)}</span>'

@@ -4,7 +4,7 @@ One plugin, all the desk hooks. Before the desk cut these were three separate
 plugins (desk-ids, desk-note, context-trace) that shared no code and had
 drifting copies of the same primitives:
 
-  transform_tool_result : stamp a global [bN] block id on every tool result —
+  transform_tool_result : stamp a global [bN] paper id on every tool result —
                           the handle the model uses to archive / recall.
   pre_llm_call          : inject the escalating watermark note; at the forced
                           level restrict tools to the context-reducing tidy
@@ -12,7 +12,7 @@ drifting copies of the same primitives:
   post_api_request      : capture the real prompt-token count for the fill
                           measure.
   pre_api_request       : context-rollback diagnostic — logs a loud trace when
-                          a request suddenly drops messages/blocks.
+                          a request suddenly drops messages/papers.
   on_session_reset      : drop the cached fill count (post-reset context is
                           small but the last-seen count is stale-high).
 
@@ -66,7 +66,7 @@ CTRACE_DROP_MSGS = int(os.environ.get("CTRACE_DROP_MSGS", "8"))
 CTRACE_DROP_IDS = int(os.environ.get("CTRACE_DROP_IDS", "5"))
 
 
-# --- block-id stamping (was: desk-ids) ------------------------------------
+# --- paper-id stamping (was: desk-ids) ------------------------------------
 def _stamp(tool_name="", args=None, result=None, session_id="",
            tool_call_id="", **_):
     """transform_tool_result hook — prepend [bN] to a tool result."""
@@ -74,7 +74,7 @@ def _stamp(tool_name="", args=None, result=None, session_id="",
         return None
     if desk_core.is_stamped(result):
         return None
-    return f"[b{desk_core.next_block_id()}] {result}"
+    return f"[p{desk_core.next_paper_id()}] {result}"
 
 
 # --- fill measurement (was: desk-note) ------------------------------------
@@ -181,11 +181,11 @@ def _on_pre_llm_call(session_id="", conversation_history=None, **_):
     # tell the model the fill is system-side rather than letting it grasp.
     if lvl == "clean":
         return {"context": note}
-    ids = desk_core.live_block_ids_on_desk(msgs)
+    ids = desk_core.live_paper_ids_on_desk(msgs)
     if ids:
-        note = note[:-1] + f"; ids on the desk: {desk_core.collapse_ranges(ids)}]"
+        note = note[:-1] + f"; papers on the desk: {desk_core.collapse_ranges(ids)}]"
     else:
-        note = note[:-1] + "; no archivable blocks remain — fill is system-side, tell the user]"
+        note = note[:-1] + "; no archivable papers remain — fill is system-side, tell the user]"
     return {"context": note}
 
 
@@ -215,7 +215,7 @@ def _on_pre_api_request(session_id="", request_messages=None, **_):
     if not session_id or not msgs:
         return
     cur_n = len(msgs)
-    cur_ids = {f"b{n}" for n in desk_core.block_ids_on_desk(msgs)}
+    cur_ids = {f"b{n}" for n in desk_core.paper_ids_on_desk(msgs)}
     last_role = msgs[-1].get("role", "") if msgs else ""
 
     ctrace = _ctrace_dir()
@@ -254,7 +254,7 @@ def _on_pre_api_request(session_id="", request_messages=None, **_):
         f"!!!   session         : {session_id}\n"
         f"!!!   previous request: {prev.get('n')} messages\n"
         f"!!!   this request    : {cur_n} messages   (dropped {count_drop})\n"
-        f"!!!   block-ids gone  : {len(dropped)}  {sorted(dropped)}\n"
+        f"!!!   paper-ids gone  : {len(dropped)}  {sorted(dropped)}\n"
         f"!!!   on-disk checkpoint: {ckpt} messages"
         f"   {'<-- checkpoint >> request: resume lost context' if ckpt and ckpt > cur_n + CTRACE_DROP_MSGS else ''}\n"
         f"!!!   process uptime  : {uptime:.0f}s  => {likely}\n"
@@ -286,7 +286,7 @@ _SHRED_BLOCK_MSG = (
     "'forced' or 'urgent' note earlier in this turn, the band has since "
     "dropped (probably because archiving freed space) — the current band is "
     "what counts. Use archive instead (reversible — recall can bring the "
-    "block back). shred is reserved for urgent and forced, where its "
+    "paper back). shred is reserved for urgent and forced, where its "
     "irreversibility is justified by the desk pressure.")
 
 
@@ -294,7 +294,7 @@ def _on_pre_tool_call(tool_name="", args=None, session_id="",
                       task_id="", tool_call_id="", **_):
     """pre_tool_call hook — gate `shred` by the current watermark band.
 
-    Returns a {action: block, message} dict to refuse the call; returns None
+    Returns a {action: paper, message} dict to refuse the call; returns None
     (or anything non-dict) to let it through. The current band is the level
     `_on_pre_llm_call` wrote to $HERMES_HOME/desk-state/<session>.level just
     before this turn.
@@ -308,7 +308,7 @@ def _on_pre_tool_call(tool_name="", args=None, session_id="",
         lvl = "clean"
     if lvl in _SHRED_BANDS:
         return None
-    return {"action": "block", "message": _SHRED_BLOCK_MSG.format(lvl=lvl)}
+    return {"action": "paper", "message": _SHRED_BLOCK_MSG.format(lvl=lvl)}
 
 
 def register(ctx) -> None:

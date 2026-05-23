@@ -1,6 +1,6 @@
 """desk_core — shared primitives for the desk (model-driven context tidying).
 
-Single source of truth for the desk plugins. Before the desk cut the block-id
+Single source of truth for the desk plugins. Before the desk cut the paper-id
 regex, content flattening, the get_hermes_home shim, and the watermark/budget
 math were copy-pasted across four plugins (and had drifted). They live here
 now; both desk plugins import this module.
@@ -34,12 +34,12 @@ def desk_home() -> Path:
     return _get_hermes_home()
 
 
-# --- block ids -------------------------------------------------------------
-# Canonical [bN] matcher. The capturing group is the bare id ("b37"). ONE
+# --- paper ids -------------------------------------------------------------
+# Canonical [bN] matcher. The capturing group is the bare id ("p37"). ONE
 # definition — the pre-cut copies had drifted (desk-note captured the digits,
 # the others captured "bN").
-BLOCK_ID_RE = re.compile(r"^\s*\[(b\d+)\]")
-_STAMPED_RE = re.compile(r"^\s*\[b\d+\]")
+PAPER_ID_RE = re.compile(r"^\s*\[(p\d+)\]")
+_STAMPED_RE = re.compile(r"^\s*\[p\d+\]")
 
 
 def content_str(msg) -> str:
@@ -52,10 +52,10 @@ def content_str(msg) -> str:
     return str(c) if c else ""
 
 
-def block_id(content) -> "str | None":
-    """Return the bare block id ('b37') stamped on a content string, else None."""
+def paper_id(content) -> "str | None":
+    """Return the bare paper id ('p37') stamped on a content string, else None."""
     s = content if isinstance(content, str) else content_str(content)
-    m = BLOCK_ID_RE.match(s)
+    m = PAPER_ID_RE.match(s)
     return m.group(1) if m else None
 
 
@@ -64,24 +64,24 @@ def is_stamped(content: str) -> bool:
     return bool(_STAMPED_RE.match(content or ""))
 
 
-def block_ids_on_desk(messages) -> "list[int]":
-    """Sorted block numbers of every [bN]-stamped tool result in messages
-    (live blocks AND archived placeholders). Use for diagnostics that need a
+def paper_ids_on_desk(messages) -> "list[int]":
+    """Sorted paper numbers of every [bN]-stamped tool result in messages
+    (live papers AND archived placeholders). Use for diagnostics that need a
     full view, like the context-trace rollback detector."""
     ids = []
     for m in messages or []:
         if not isinstance(m, dict) or m.get("role") != "tool":
             continue
-        bid = block_id(content_str(m))
+        bid = paper_id(content_str(m))
         if bid:
             ids.append(int(bid[1:]))
     return sorted(set(ids))
 
 
-def live_block_ids_on_desk(messages) -> "list[int]":
-    """Sorted block numbers of LIVE (non-archived) tool-result blocks.
+def live_paper_ids_on_desk(messages) -> "list[int]":
+    """Sorted paper numbers of LIVE (non-archived) tool-result papers.
 
-    Archived blocks remain as one-line placeholders in the message stream so
+    Archived papers remain as one-line placeholders in the message stream so
     `recall` can still find them, but they take negligible space. Listing
     placeholders in the desk-note's "ids on the desk" caused the model to
     misread them as "occupied slots" and deadlock-narrate at the forced band.
@@ -92,7 +92,7 @@ def live_block_ids_on_desk(messages) -> "list[int]":
         if not isinstance(m, dict) or m.get("role") != "tool":
             continue
         c = content_str(m)
-        bid = block_id(c)
+        bid = paper_id(c)
         if bid and "(archived:" not in c:
             ids.append(int(bid[1:]))
     return sorted(set(ids))
@@ -109,15 +109,15 @@ def collapse_ranges(nums) -> str:
     parts = []
     for a, b in runs:
         if a == b:
-            parts.append(f"b{a}")
+            parts.append(f"p{a}")
         elif b == a + 1:
-            parts.append(f"b{a}, b{b}")
+            parts.append(f"p{a}, p{b}")
         else:
-            parts.append(f"b{a}–b{b}")
+            parts.append(f"p{a}–p{b}")
     return ", ".join(parts)
 
 
-# --- global block-id counter ----------------------------------------------
+# --- global paper-id counter ----------------------------------------------
 _counter_lock = threading.Lock()
 
 
@@ -127,7 +127,7 @@ def _counter_file() -> Path:
     return d / "_global.count"
 
 
-def next_block_id() -> int:
+def next_paper_id() -> int:
     """Next number from the global monotonic counter (one sequence, all sessions)."""
     f = _counter_file()
     with _counter_lock:
@@ -141,13 +141,13 @@ def next_block_id() -> int:
         except Exception:
             # A failed persist means the next call re-reads the stale value
             # and returns a duplicate id — log it so the cause is traceable.
-            logger.warning("desk block-id counter write failed; id %d may not persist", n)
+            logger.warning("desk paper-id counter write failed; id %d may not persist", n)
     return n
 
 
 # --- state directories -----------------------------------------------------
 def archive_dir() -> Path:
-    """Flat, session-independent archive store (block ids are globally unique)."""
+    """Flat, session-independent archive store (paper ids are globally unique)."""
     d = desk_home() / "desk-archive"
     d.mkdir(parents=True, exist_ok=True)
     return d
@@ -197,9 +197,9 @@ _ENTRY = {"clean": 0.0, "notice": NOTICE_PCT, "urgent": URGENT_PCT, "forced": FO
 # fresh, current state signal — no stale-memory mismatches with the gate.
 NOTES = {
     "clean": "[desk: clean]",
-    "notice": "[desk: notice — filling up; archive a spent block when you can. shred is unavailable below urgent.]",
-    "urgent": "[desk: urgent — nearly full; archive a spent block before continuing. shred is now available.]",
-    "forced": "[desk: forced — full; archive or shred spent blocks now (only archive and shred are usable until you make room).]",
+    "notice": "[desk: notice — filling up; archive a spent paper when you can. shred is unavailable below urgent.]",
+    "urgent": "[desk: urgent — nearly full; archive a spent paper before continuing. shred is now available.]",
+    "forced": "[desk: forced — full; archive or shred spent papers now (only archive and shred are usable until you make room).]",
 }
 # Tools permitted at the forced level — context-REDUCING tidy ops only.
 # `recall` is excluded: it grows the desk.
@@ -289,7 +289,7 @@ def log_overflow(offending: "tuple[str, int] | None", n_messages: int) -> None:
         "!!! DESK OVERFLOW — request exceeded the context window before a\n"
         "!!! tidy turn could run. The desk cannot reduce context synchronously.\n"
         f"!!!   messages on the desk : {n_messages}\n"
-        f"!!!   largest block        : {bid}  ({size:,} chars)\n"
+        f"!!!   largest paper        : {bid}  ({size:,} chars)\n"
         "!!!   the turn is being aborted; the session is preserved.\n"
         + "!" * 74
     )
