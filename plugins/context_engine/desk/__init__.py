@@ -239,8 +239,9 @@ class DeskEngine(ContextEngine):
                     content, encoding="utf-8")
             except Exception as e:
                 return json.dumps({"error": f"archive write failed: {e}"})
+            tok = desk_core.token_count(content)
             block["content"] = (
-                f"[{target}] {_ARCHIVED_MARK} {desc} — {len(content):,} chars "
+                f"[{target}] {_ARCHIVED_MARK} {desc} — ~{tok:,} tokens "
                 f"off-desk; recall {target} to restore)")
             return json.dumps({"result": f"archived {target}"})
 

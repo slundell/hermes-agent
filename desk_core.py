@@ -217,6 +217,54 @@ def level_for(frac: float, prev: str = "calm") -> str:
     return lvl
 
 
+# --- token counting --------------------------------------------------------
+# DESK_TOKENIZER_URL — if set, points at a tokenizer endpoint (llamacpp's
+# `POST /tokenize` shape: body `{"content": text}` → `{"tokens": [int,...]}`).
+# Lets archive placeholders carry an *accurate* token count instead of the
+# chars/4 estimate. Set to the worker URL matching the model the agent
+# actually uses (e.g. http://qwen36-27b-scan.llm.svc.cluster.wpu.nu/tokenize).
+# Empty / unset → fall back to chars/4. A short timeout protects the agent
+# loop from a slow tokenizer; any failure falls back to chars/4.
+DESK_TOKENIZER_URL = os.environ.get("DESK_TOKENIZER_URL", "").strip()
+DESK_TOKENIZER_TIMEOUT = float(os.environ.get("DESK_TOKENIZER_TIMEOUT", "2.0"))
+
+
+def token_count(text: str) -> int:
+    """Return the token count of `text`.
+
+    Calls the tokenizer endpoint at `DESK_TOKENIZER_URL` if configured, else
+    falls back to a chars/4 estimate. Any failure (network, parse) falls
+    back to chars/4. Never raises — the caller can use the result as a
+    placeholder size unconditionally.
+    """
+    s = text or ""
+    fallback = max(1, len(s) // 4) if s else 0
+    if not DESK_TOKENIZER_URL or not s:
+        return fallback
+    try:
+        import json as _json
+        import urllib.request
+        body = _json.dumps({"content": s}).encode("utf-8")
+        req = urllib.request.Request(
+            DESK_TOKENIZER_URL,
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
+        with urllib.request.urlopen(req, timeout=DESK_TOKENIZER_TIMEOUT) as resp:
+            data = _json.loads(resp.read().decode("utf-8", errors="replace"))
+        # llamacpp: {"tokens": [int,...]} — preferred shape
+        toks = data.get("tokens") or data.get("token_ids")
+        if isinstance(toks, list):
+            return len(toks)
+        if isinstance(data.get("count"), int):
+            return int(data["count"])
+        if isinstance(data.get("n_tokens"), int):
+            return int(data["n_tokens"])
+    except Exception:
+        pass
+    return fallback
+
+
 # --- loud overflow diagnostic ----------------------------------------------
 def log_overflow(offending: "tuple[str, int] | None", n_messages: int) -> None:
     """Loud diagnostic when the desk overflowed before any tidy turn could run.

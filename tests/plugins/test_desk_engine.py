@@ -97,8 +97,9 @@ def test_archive_placeholder_format(engine):
     placeholder = msgs[0]["content"]
     # format: [b1] (archived: <desc> — <chars> chars off-desk; recall b1 to restore)
     assert placeholder.startswith("[b1] (archived: run_agent.py:1-1000 — orientation")
-    # the chars count reflects the full original content (incl. [bN] prefix)
-    assert "chars off-desk" in placeholder
+    # size is measured in tokens now (via desk_core.token_count — chars/4
+    # fallback when no DESK_TOKENIZER_URL configured)
+    assert "tokens off-desk" in placeholder
     assert "recall b1 to restore" in placeholder
 
 

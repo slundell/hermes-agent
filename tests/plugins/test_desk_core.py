@@ -87,6 +87,58 @@ def test_level_for_hysteresis_holds_band_on_exit(dc):
     assert dc.level_for(0.82, prev="urgent") == "notice"
 
 
+def test_token_count_fallback_when_no_url(dc, monkeypatch):
+    monkeypatch.setattr(dc, "DESK_TOKENIZER_URL", "")
+    assert dc.token_count("") == 0
+    # chars/4 fallback with floor of 1 for non-empty input
+    assert dc.token_count("hi") == 1
+    s = "x" * 400
+    assert dc.token_count(s) == 100
+
+
+def test_token_count_calls_endpoint(dc, monkeypatch):
+    """When DESK_TOKENIZER_URL is set, token_count POSTs to it and returns
+    the length of the `tokens` list."""
+    import json as _json
+    import urllib.request
+
+    class _FakeResp:
+        def __init__(self, body):
+            self._body = body
+        def read(self):
+            return self._body
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    captured = {}
+    def _fake_urlopen(req, timeout=None):
+        captured["url"] = req.full_url
+        captured["body"] = req.data
+        captured["timeout"] = timeout
+        # mimic llamacpp's {"tokens": [...]}
+        body = _json.dumps({"tokens": list(range(73))}).encode("utf-8")
+        return _FakeResp(body)
+
+    monkeypatch.setattr(dc, "DESK_TOKENIZER_URL", "http://fake/tokenize")
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    n = dc.token_count("some content")
+    assert n == 73
+    assert captured["url"] == "http://fake/tokenize"
+    assert _json.loads(captured["body"].decode("utf-8")) == {"content": "some content"}
+
+
+def test_token_count_falls_back_on_endpoint_failure(dc, monkeypatch):
+    """Any tokenizer endpoint failure → chars/4 fallback, never raises."""
+    import urllib.request
+    def _boom(*a, **k):
+        raise OSError("network down")
+    monkeypatch.setattr(dc, "DESK_TOKENIZER_URL", "http://fake/tokenize")
+    monkeypatch.setattr(urllib.request, "urlopen", _boom)
+    assert dc.token_count("x" * 200) == 50
+
+
 def test_log_overflow_writes_loud_diagnostic(dc, tmp_path):
     dc.log_overflow(("b42", 123456), n_messages=80)
     log = tmp_path / "desk" / "overflow.log"
