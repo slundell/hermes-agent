@@ -63,13 +63,20 @@ def test_pre_llm_call_emits_note_at_notice_level(desk):
     assert "ids on the desk: b1" in out["context"]
 
 
-def test_pre_llm_call_calm_returns_no_note(desk):
+def test_pre_llm_call_calm_returns_short_state_note(desk):
+    """Calm now emits a short '[desk: calm]' note (was None pre-v8) so the
+    model's most recent prompt always carries the current band — fixing the
+    sync issue where a stale 'forced' note in history led to misuse."""
     import desk_core
     desk._on_post_api_request(
         usage={"prompt_tokens": int(desk_core.EFFECTIVE_CTX * 0.10)},
         session_id="s2")
     out = desk._on_pre_llm_call(session_id="s2", conversation_history=[])
-    assert out is None
+    assert out is not None
+    assert "calm" in out["context"].lower()
+    # calm note must NOT carry the id-listing appendix (desk is fine)
+    assert "ids on the desk" not in out["context"]
+    assert "no archivable" not in out["context"]
 
 
 def test_forced_level_restricts_tools(desk, monkeypatch):
@@ -103,8 +110,12 @@ def test_session_reset_clears_cached_tokens(desk):
     desk._on_session_reset(session_id="s5")
     # after reset the cached count is gone — the next turn falls back to the
     # chars/4 estimate (calm for an empty history), not a stale 'forced'.
+    # Post-v8: calm emits a short note so the state is positively signalled
+    # to the model on every iteration; assert it's the calm note (not forced).
     out = desk._on_pre_llm_call(session_id="s5", conversation_history=[])
-    assert out is None
+    assert out is not None
+    assert "calm" in out["context"].lower()
+    assert "forced" not in out["context"].lower()
 
 
 def _set_level(tmp_path, sid, lvl):
@@ -118,6 +129,10 @@ def test_pre_tool_call_blocks_shred_at_calm(desk, tmp_path):
     assert isinstance(r, dict) and r.get("action") == "block"
     assert "shred is unavailable" in r["message"]
     assert "calm" in r["message"]
+    # the denial must explain the band may have dropped since the model saw
+    # a higher-band note (the sync issue) — so the model doesn't read the
+    # block as a contradiction
+    assert "dropped" in r["message"].lower() or "since" in r["message"].lower()
 
 
 def test_pre_tool_call_blocks_shred_at_notice(desk, tmp_path):

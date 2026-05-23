@@ -188,8 +188,15 @@ _ENTRY = {"calm": 0.0, "notice": NOTICE_PCT, "urgent": URGENT_PCT, "forced": FOR
 # asking the user to "raise the level" because it didn't know it was
 # already AT forced — see v6 drive observation). Each band also names the
 # tidy tools currently available to it.
+#
+# Calm gets a short note too (was None), to fix a turn/tool-call sync issue
+# seen in v7: within a multi-iteration turn the band can drop (e.g.
+# forced → calm after archives), but if calm emits no note the model still
+# sees the old forced note in history and acts on it (e.g. tries to shred).
+# Always emitting the current band's note gives every iteration's prompt a
+# fresh, current state signal — no stale-memory mismatches with the gate.
 NOTES = {
-    "calm": None,
+    "calm": "[desk: calm]",
     "notice": "[desk: notice — filling up; archive a spent block when you can. shred is unavailable below urgent.]",
     "urgent": "[desk: urgent — nearly full; archive a spent block before continuing. shred is now available.]",
     "forced": "[desk: forced — full; archive or shred spent blocks now (only archive and shred are usable until you make room).]",

@@ -173,18 +173,18 @@ def _on_pre_llm_call(session_id="", conversation_history=None, **_):
     note = desk_core.NOTES.get(lvl)
     if not note:
         return None
-    # Carry only the LIVE block ids — archived placeholders stay in the
-    # message stream as recall handles but don't appear in the note, so the
-    # model sees archiving visibly clear the desk instead of misreading
-    # placeholders as "occupied slots".
+    # Calm gets a short note as-is — no id listing needed (desk is fine).
+    # Non-calm gets a LIVE id appendix so the model can pick targets;
+    # archived placeholders stay in the message stream as recall handles but
+    # don't appear in the note (so the model doesn't misread them as
+    # "occupied slots"). If no live ids remain and the desk is still hot,
+    # tell the model the fill is system-side rather than letting it grasp.
+    if lvl == "calm":
+        return {"context": note}
     ids = desk_core.live_block_ids_on_desk(msgs)
     if ids:
         note = note[:-1] + f"; ids on the desk: {desk_core.collapse_ranges(ids)}]"
     else:
-        # Watermark fired but there is nothing the model can tidy — the fill
-        # is entirely system-side (system prompt, tools, memory, AGENTS.md).
-        # Tell the model so explicitly so it doesn't grasp at non-existent
-        # ids; the user, not the model, has to resolve this.
         note = note[:-1] + "; no archivable blocks remain — fill is system-side, tell the user]"
     return {"context": note}
 
@@ -282,10 +282,12 @@ def _on_pre_api_request(session_id="", request_messages=None, **_):
 # urgent and forced where the extra reduction it offers genuinely matters.
 _SHRED_BANDS = {"urgent", "forced"}
 _SHRED_BLOCK_MSG = (
-    "shred is unavailable at the {lvl} level. Use archive instead — it is "
-    "reversible (the block can be brought back with recall). shred becomes "
-    "available at urgent and forced, where its irreversibility is justified "
-    "by the desk pressure.")
+    "shred is unavailable at the current desk level ({lvl}). If you saw a "
+    "'forced' or 'urgent' note earlier in this turn, the band has since "
+    "dropped (probably because archiving freed space) — the current band is "
+    "what counts. Use archive instead (reversible — recall can bring the "
+    "block back). shred is reserved for urgent and forced, where its "
+    "irreversibility is justified by the desk pressure.")
 
 
 def _on_pre_tool_call(tool_name="", args=None, session_id="",

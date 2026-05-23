@@ -88,18 +88,22 @@ def test_level_for_hysteresis_holds_band_on_exit(dc):
 
 
 def test_notes_open_with_band_name(dc):
-    """Each non-calm note must open with the band's literal name so the model
-    has a positive signal of which band it's in (v6 drive showed Aina stalled
-    at forced asking the user to 'raise to urgent/forced' because the note
-    only said 'full' — she couldn't tell she was already at forced)."""
-    assert dc.NOTES["calm"] is None
+    """Every note must open with the band's literal name so the model has a
+    positive signal of which band it's in. Calm gets a (short) note now too —
+    v7 drive showed Aina acting on a stale 'forced' note in history after the
+    band had dropped to calm; emitting a calm note every iteration keeps the
+    most recent prompt state-current."""
+    assert dc.NOTES["calm"] is not None
+    assert "calm" in dc.NOTES["calm"].lower()
     assert "notice" in dc.NOTES["notice"].lower()
     assert "urgent" in dc.NOTES["urgent"].lower()
     assert "forced" in dc.NOTES["forced"].lower()
-    # each band's note should also mention which tidy ops are now usable
-    assert "shred" in dc.NOTES["notice"].lower()        # mentions shred status
+    # each non-calm band's note should also mention shred's availability
+    assert "shred" in dc.NOTES["notice"].lower()
     assert "shred" in dc.NOTES["urgent"].lower()
     assert "shred" in dc.NOTES["forced"].lower()
+    # calm note stays short — no per-turn token waste
+    assert len(dc.NOTES["calm"]) <= 30
 
 
 def test_token_count_fallback_when_no_url(dc, monkeypatch):
