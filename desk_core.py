@@ -194,18 +194,26 @@ def state_dir() -> Path:
 # threshold" — the budget is the model window minus a small reserve that
 # guarantees room for the model to emit tidy-tool calls at the forced level.
 DESK_MODEL_MAX_CTX = int(os.environ.get("DESK_MODEL_MAX_CTX", "262144") or 262144)
-# Headroom reserved above the forced ceiling. The forced band only ever emits
-# tidy-tool calls (archive/shred — tens of tokens), so 4k is ample; this is
-# much tighter than a general output reserve and widens normal working room.
-FORCED_HEADROOM_TOKENS = int(os.environ.get("DESK_FORCED_HEADROOM", "4096") or 4096)
-# Budget the watermark fractions are measured against.
-EFFECTIVE_CTX = max(1, DESK_MODEL_MAX_CTX - FORCED_HEADROOM_TOKENS)
+# Compressor trigger anchor — the token threshold past which the gateway
+# hygiene's LLM compressor will step in (gateway/run.py, default 0.85 of
+# model context). The desk's working budget and band thresholds are
+# computed relative to THIS, not to model max, so the desk bands stay
+# below the compressor's trigger by construction.
+HYGIENE_PCT = float(os.environ.get("DESK_HYGIENE_PCT", "0.85"))
+HYGIENE_THRESHOLD = max(1, int(DESK_MODEL_MAX_CTX * HYGIENE_PCT))
+# Effective working budget for the desk. The bands below are fractions of
+# this, so forced < hygiene by design — the model has a safety margin
+# (forced..hygiene) during which it can still archive proactively before
+# the compressor takes over.
+EFFECTIVE_CTX = HYGIENE_THRESHOLD
 
-# Watermark bands, as fractions of EFFECTIVE_CTX. forced == 1.0 means the
-# forced band begins exactly at the ceiling (max_ctx - 4k).
+# Watermark bands, as fractions of EFFECTIVE_CTX. forced = 0.95 means the
+# forced band fires at 95% of the hygiene trigger — leaving ~5% (about 11k
+# tokens at default settings) for the model to actually archive before the
+# LLM compressor preempts. notice 0.80, urgent 0.90, forced 0.95.
 NOTICE_PCT = float(os.environ.get("DESK_NOTICE_PCT", "0.80"))
 URGENT_PCT = float(os.environ.get("DESK_URGENT_PCT", "0.90"))
-FORCED_PCT = float(os.environ.get("DESK_FORCED_PCT", "1.00"))
+FORCED_PCT = float(os.environ.get("DESK_FORCED_PCT", "0.95"))
 HYSTERESIS = float(os.environ.get("DESK_HYSTERESIS", "0.05"))
 
 LEVELS = ["clean", "notice", "urgent", "forced"]

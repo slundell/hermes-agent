@@ -68,15 +68,42 @@ def test_next_block_id_is_monotonic(dc):
     assert dc.next_paper_id() == first + 2
 
 
-def test_effective_ctx_is_window_minus_headroom(dc):
-    assert dc.EFFECTIVE_CTX == dc.DESK_MODEL_MAX_CTX - dc.FORCED_HEADROOM_TOKENS
+def test_effective_ctx_is_hygiene_threshold(dc):
+    # EFFECTIVE_CTX anchors the desk's working budget to the LLM-compressor's
+    # trigger point (gateway hygiene's token threshold, default 0.85 of
+    # model context). The desk bands are fractions of this — so forced
+    # sits BELOW hygiene by design, giving the model a safety margin to
+    # archive proactively before compression takes over.
+    assert dc.HYGIENE_PCT == 0.85
+    assert dc.HYGIENE_THRESHOLD == int(dc.DESK_MODEL_MAX_CTX * dc.HYGIENE_PCT)
+    assert dc.EFFECTIVE_CTX == dc.HYGIENE_THRESHOLD
+
+
+def test_forced_band_sits_below_hygiene(dc):
+    # forced = 0.95 × EFFECTIVE_CTX means the desk's forced band fires at
+    # 95% of the compressor's trigger — a 5% safety margin during which
+    # the model can still archive before the LLM compressor steps in.
+    assert dc.FORCED_PCT == 0.95
+    # Compute the token-level thresholds and assert the ordering:
+    # notice < urgent < forced < hygiene (compressor) < model_max
+    notice_tok = int(dc.NOTICE_PCT * dc.EFFECTIVE_CTX)
+    urgent_tok = int(dc.URGENT_PCT * dc.EFFECTIVE_CTX)
+    forced_tok = int(dc.FORCED_PCT * dc.EFFECTIVE_CTX)
+    hygiene_tok = dc.HYGIENE_THRESHOLD
+    assert notice_tok < urgent_tok < forced_tok < hygiene_tok < dc.DESK_MODEL_MAX_CTX
+    # Forced should leave a meaningful gap before hygiene (~5% of effective)
+    assert hygiene_tok - forced_tok >= int(0.04 * dc.EFFECTIVE_CTX)
 
 
 def test_level_for_bands(dc):
-    # fractions of EFFECTIVE_CTX: notice 0.80, urgent 0.90, forced 1.00
+    # Band entries: notice 0.80, urgent 0.90, forced 0.95 (of EFFECTIVE_CTX).
+    # Note: with the band-relative-to-hygiene refactor, fill values up to ~1.05
+    # are still meaningful — they represent the model overshooting into the
+    # hygiene safety margin before the compressor catches up.
     assert dc.level_for(0.50) == "clean"
     assert dc.level_for(0.85) == "notice"
-    assert dc.level_for(0.95) == "urgent"
+    assert dc.level_for(0.92) == "urgent"
+    assert dc.level_for(0.96) == "forced"
     assert dc.level_for(1.05) == "forced"
 
 

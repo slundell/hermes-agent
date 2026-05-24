@@ -22,8 +22,12 @@ Importable as a module for in-process auto-regen, or called via the CLI in
 Env knobs (mirror `desk_core` so the band thresholds match what the
 watermark uses in the pod):
   DESK_MODEL_MAX_CTX       (default 262144) — model context window in tokens
-  DESK_FORCED_HEADROOM     (default 4096)   — output reserve at forced
+  DESK_HYGIENE_PCT         (default 0.85)   — LLM-compressor trigger as a
+                                              fraction of model context.
+                                              EFFECTIVE_CTX is anchored to
+                                              this; the desk bands live below.
   DESK_NOTICE_PCT/URGENT_PCT/FORCED_PCT     — band fractions of effective
+                                              (defaults: 0.80, 0.90, 0.95)
 """
 from __future__ import annotations
 
@@ -39,11 +43,12 @@ PID = re.compile(r"^\s*\[(p\d+)\]")
 
 # --- thresholds (read same env as desk_core in the pod) -------------------
 DESK_MODEL_MAX_CTX = int(os.environ.get("DESK_MODEL_MAX_CTX", "262144") or 262144)
-FORCED_HEADROOM_TOKENS = int(os.environ.get("DESK_FORCED_HEADROOM", "4096") or 4096)
-EFFECTIVE_CTX = max(1, DESK_MODEL_MAX_CTX - FORCED_HEADROOM_TOKENS)
+HYGIENE_PCT = float(os.environ.get("DESK_HYGIENE_PCT", "0.85"))
+HYGIENE_THRESHOLD = max(1, int(DESK_MODEL_MAX_CTX * HYGIENE_PCT))
+EFFECTIVE_CTX = HYGIENE_THRESHOLD
 NOTICE_PCT = float(os.environ.get("DESK_NOTICE_PCT", "0.80"))
 URGENT_PCT = float(os.environ.get("DESK_URGENT_PCT", "0.90"))
-FORCED_PCT = float(os.environ.get("DESK_FORCED_PCT", "1.00"))
+FORCED_PCT = float(os.environ.get("DESK_FORCED_PCT", "0.95"))
 
 
 def _band(toks: int) -> str:
