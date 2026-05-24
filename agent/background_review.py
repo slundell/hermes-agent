@@ -409,7 +409,16 @@ def _run_review_in_thread(
                 # Until that's fixed upstream, send the review to the cheap aux
                 # model. Env-gated — no-op unless HERMES_REVIEW_MODEL is set.
                 model=os.environ.get("HERMES_REVIEW_MODEL") or agent.model,
-                max_iterations=16,
+                # Iteration budget for the background reviewer. The reviewer
+                # walks the skill library, opens candidate files, reads
+                # context, decides whether to edit — each step is one
+                # iteration. 16 was too tight for sessions with many
+                # candidate skills (observed: max_iterations_reached on
+                # 256 tool_turns / 16 api_calls in a long Aina turn).
+                # Bumped default to 32 + env-tunable so it can be raised
+                # further without a code change.
+                max_iterations=int(
+                    os.environ.get("HERMES_REVIEW_MAX_ITERATIONS", "32") or 32),
                 quiet_mode=True,
                 platform=agent.platform,
                 provider=agent.provider,
