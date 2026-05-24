@@ -199,6 +199,42 @@ def test_fill_fraction(dc):
     assert dc.fill_fraction(0) == 0.0
 
 
+def test_fill_fraction_takes_msg_axis_when_higher(dc):
+    # The desk's bands should escalate on EITHER token OR live-message
+    # pressure — whichever axis is closer to the gateway hygiene trigger.
+    # The msg axis is normalised against HYGIENE_MSGS (gateway's
+    # hygiene_hard_message_limit), so msg_fraction = live_msgs / HYGIENE_MSGS.
+    # fill_fraction returns max(token_frac, msg_frac).
+    assert dc.HYGIENE_MSGS == 1000
+    # Loose tolerance — int-truncation of (frac × EFFECTIVE_CTX) loses up to
+    # 1 / EFFECTIVE_CTX of precision (~5e-6 at 262k window).
+    tol = 1e-4
+    # Token-only path (no live_msgs arg) — back-compat, unchanged.
+    assert dc.fill_fraction(int(0.50 * dc.EFFECTIVE_CTX)) == pytest.approx(0.50, abs=tol)
+    # Msg axis dominates: low tokens (10%) but high msg count (95% of HYGIENE_MSGS) → 0.95.
+    low_tokens = int(0.10 * dc.EFFECTIVE_CTX)
+    high_msgs = int(0.95 * dc.HYGIENE_MSGS)
+    assert dc.fill_fraction(low_tokens, live_msgs=high_msgs) == pytest.approx(0.95, abs=tol)
+    # Token axis dominates: high tokens, low msgs → token fraction wins.
+    high_tokens = int(0.80 * dc.EFFECTIVE_CTX)
+    low_msgs = int(0.10 * dc.HYGIENE_MSGS)
+    assert dc.fill_fraction(high_tokens, live_msgs=low_msgs) == pytest.approx(0.80, abs=tol)
+    # Both equal → either, no spurious doubling.
+    eq_tokens = int(0.70 * dc.EFFECTIVE_CTX)
+    eq_msgs = int(0.70 * dc.HYGIENE_MSGS)
+    assert dc.fill_fraction(eq_tokens, live_msgs=eq_msgs) == pytest.approx(0.70, abs=tol)
+
+
+def test_fill_fraction_msg_axis_alone_can_trigger_forced(dc):
+    # With ~zero tokens, a high live-msg count alone is enough to reach
+    # the forced band. Mirrors the gateway hygiene msg-count valve at 95%
+    # of HYGIENE_MSGS → forced band fraction = 0.95.
+    forced_msgs = int(dc.FORCED_PCT * dc.HYGIENE_MSGS)  # 0.95 × 1000 = 950
+    frac = dc.fill_fraction(0, live_msgs=forced_msgs)
+    assert frac >= dc.FORCED_PCT
+    assert dc.level_for(frac) == "forced"
+
+
 def test_log_overflow_handles_none_offending(dc, tmp_path):
     # a real overflow may have no identified paper — must not crash
     dc.log_overflow(None, n_messages=12)

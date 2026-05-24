@@ -210,7 +210,15 @@ def _on_pre_llm_call(session_id="", conversation_history=None, **_):
     # pair it with the response's real prompt_tokens to update the baseline.
     _PENDING_CHARS4[sid] = chars4_now
 
-    frac = desk_core.fill_fraction(tokens)
+    # Two pressure axes drive the band: tokens (against EFFECTIVE_CTX) and
+    # live message count (against HYGIENE_MSGS, the gateway's hard-limit
+    # valve). fill_fraction returns the max of the two — whichever is
+    # closer to its hygiene trigger drives the band escalation. This means
+    # a session that produces many small papers (lots of tool results,
+    # average <500 tokens/msg) escalates through notice/urgent/forced on
+    # the msg axis before the token axis catches up.
+    live_msgs = desk_core.live_message_count(msgs)
+    frac = desk_core.fill_fraction(tokens, live_msgs=live_msgs)
 
     lf = _level_file(sid)
     try:

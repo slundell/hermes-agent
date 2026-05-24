@@ -201,6 +201,14 @@ DESK_MODEL_MAX_CTX = int(os.environ.get("DESK_MODEL_MAX_CTX", "262144") or 26214
 # below the compressor's trigger by construction.
 HYGIENE_PCT = float(os.environ.get("DESK_HYGIENE_PCT", "0.85"))
 HYGIENE_THRESHOLD = max(1, int(DESK_MODEL_MAX_CTX * HYGIENE_PCT))
+# Live-message-count parallel of HYGIENE_THRESHOLD — the gateway hygiene's
+# hard_message_limit (compression.hygiene_hard_message_limit in config.yaml,
+# default 1000). The desk bands track this axis too via fill_fraction's
+# live_msgs arg: msg-count growth (lots of small tool results) escalates
+# the band even when tokens stay low. Operator must keep this in sync
+# with the gateway config; sync drift just means the desk's msg-band
+# fires earlier or later than ideal relative to the actual valve.
+HYGIENE_MSGS = int(os.environ.get("DESK_HYGIENE_MSGS", "1000") or 1000)
 # Effective working budget for the desk. The bands below are fractions of
 # this, so forced < hygiene by design — the model has a safety margin
 # (forced..hygiene) during which it can still archive proactively before
@@ -243,9 +251,21 @@ NOTES = {
 FORCED_TIDY_TOOLS = {"archive", "shred"}
 
 
-def fill_fraction(tokens: float) -> float:
-    """Desk fill as a fraction of the effective budget."""
-    return tokens / EFFECTIVE_CTX
+def fill_fraction(tokens: float, live_msgs: int = 0) -> float:
+    """Desk fill as a fraction of the effective budget.
+
+    Returns max(token_fraction, msg_fraction):
+      - token_fraction = tokens / EFFECTIVE_CTX  (HYGIENE_THRESHOLD)
+      - msg_fraction   = live_msgs / HYGIENE_MSGS
+
+    The desk bands escalate on whichever pressure axis is closer to its
+    hygiene trigger. With live_msgs omitted (default 0) only the token
+    axis applies — back-compat for callers that don't supply a count."""
+    token_frac = tokens / EFFECTIVE_CTX
+    if live_msgs <= 0:
+        return token_frac
+    msg_frac = live_msgs / HYGIENE_MSGS
+    return token_frac if token_frac >= msg_frac else msg_frac
 
 
 def level_for(frac: float, prev: str = "clean") -> str:
