@@ -185,6 +185,78 @@ def test_token_count_falls_back_on_endpoint_failure(dc, monkeypatch):
     assert dc.token_count("x" * 200) == 50
 
 
+def test_token_count_uses_fallback_url_when_primary_fails(dc, monkeypatch):
+    """When the primary tokenizer URL fails, try DESK_TOKENIZER_FALLBACK_URL
+    before resorting to chars/4. Lets operations switch the std backend
+    (27b ↔ 9b) without breaking token counts during the transition."""
+    import json as _json
+    import urllib.request
+
+    class _FakeResp:
+        def __init__(self, body):
+            self._body = body
+        def read(self):
+            return self._body
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    calls = []
+    def _fake_urlopen(req, timeout=None):
+        calls.append(req.full_url)
+        if "primary" in req.full_url:
+            raise OSError("primary down")
+        # Fallback returns 42 tokens
+        return _FakeResp(_json.dumps({"tokens": list(range(42))}).encode("utf-8"))
+
+    monkeypatch.setattr(dc, "DESK_TOKENIZER_URL", "http://primary/tokenize")
+    monkeypatch.setattr(dc, "DESK_TOKENIZER_FALLBACK_URL", "http://fallback/tokenize")
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    assert dc.token_count("x" * 80) == 42
+    # Primary tried first, fallback second
+    assert calls == ["http://primary/tokenize", "http://fallback/tokenize"]
+
+
+def test_token_count_skips_fallback_when_primary_succeeds(dc, monkeypatch):
+    """The fallback is only attempted on primary failure — a successful
+    primary call short-circuits."""
+    import json as _json
+    import urllib.request
+
+    class _FakeResp:
+        def __init__(self, body):
+            self._body = body
+        def read(self):
+            return self._body
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    calls = []
+    def _fake_urlopen(req, timeout=None):
+        calls.append(req.full_url)
+        return _FakeResp(_json.dumps({"tokens": list(range(17))}).encode("utf-8"))
+
+    monkeypatch.setattr(dc, "DESK_TOKENIZER_URL", "http://primary/tokenize")
+    monkeypatch.setattr(dc, "DESK_TOKENIZER_FALLBACK_URL", "http://fallback/tokenize")
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    assert dc.token_count("x" * 80) == 17
+    assert calls == ["http://primary/tokenize"]  # fallback never tried
+
+
+def test_token_count_chars4_when_both_endpoints_fail(dc, monkeypatch):
+    """Primary fail + fallback fail → chars/4 estimate. Never raises."""
+    import urllib.request
+    def _boom(*a, **k):
+        raise OSError("both down")
+    monkeypatch.setattr(dc, "DESK_TOKENIZER_URL", "http://primary/tokenize")
+    monkeypatch.setattr(dc, "DESK_TOKENIZER_FALLBACK_URL", "http://fallback/tokenize")
+    monkeypatch.setattr(urllib.request, "urlopen", _boom)
+    assert dc.token_count("x" * 200) == 50  # chars/4 floor
+
+
 def test_log_overflow_writes_loud_diagnostic(dc, tmp_path):
     dc.log_overflow(("p42", 123456), n_messages=80)
     log = tmp_path / "desk" / "overflow.log"

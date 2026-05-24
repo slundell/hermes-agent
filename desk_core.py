@@ -295,27 +295,28 @@ def level_for(frac: float, prev: str = "clean") -> str:
 # Empty / unset → fall back to chars/4. A short timeout protects the agent
 # loop from a slow tokenizer; any failure falls back to chars/4.
 DESK_TOKENIZER_URL = os.environ.get("DESK_TOKENIZER_URL", "").strip()
+# Optional fallback URL — tried when the primary tokenizer endpoint fails
+# (5xx, timeout, network error). Lets ops swap the std backend behind the
+# pass-through (e.g. 27b → 9b) without breaking token counts during the
+# transition. Both endpoints should accept `{"content":text}` and return
+# `{"tokens":[...]}` (llama.cpp shape) or the alt shapes token_count
+# already recognises. Empty / unset disables the fallback.
+DESK_TOKENIZER_FALLBACK_URL = os.environ.get("DESK_TOKENIZER_FALLBACK_URL", "").strip()
 DESK_TOKENIZER_TIMEOUT = float(os.environ.get("DESK_TOKENIZER_TIMEOUT", "2.0"))
 
 
-def token_count(text: str) -> int:
-    """Return the token count of `text`.
-
-    Calls the tokenizer endpoint at `DESK_TOKENIZER_URL` if configured, else
-    falls back to a chars/4 estimate. Any failure (network, parse) falls
-    back to chars/4. Never raises — the caller can use the result as a
-    placeholder size unconditionally.
-    """
-    s = text or ""
-    fallback = max(1, len(s) // 4) if s else 0
-    if not DESK_TOKENIZER_URL or not s:
-        return fallback
+def _tokenize_via(url: str, text: str) -> "int | None":
+    """POST `text` to a tokenizer endpoint and return the token count, or
+    None on any failure (network, parse, unrecognised shape). Used by
+    token_count to walk primary → fallback URLs without raising."""
+    if not url or not text:
+        return None
     try:
         import json as _json
         import urllib.request
-        body = _json.dumps({"content": s}).encode("utf-8")
+        body = _json.dumps({"content": text}).encode("utf-8")
         req = urllib.request.Request(
-            DESK_TOKENIZER_URL,
+            url,
             data=body,
             headers={"Content-Type": "application/json"},
         )
@@ -329,9 +330,31 @@ def token_count(text: str) -> int:
             return int(data["count"])
         if isinstance(data.get("n_tokens"), int):
             return int(data["n_tokens"])
+        if isinstance(data.get("total_tokens"), int):
+            return int(data["total_tokens"])
     except Exception:
-        pass
-    return fallback
+        return None
+    return None
+
+
+def token_count(text: str) -> int:
+    """Return the token count of `text`.
+
+    Tries `DESK_TOKENIZER_URL` first; if that fails (5xx, timeout, parse),
+    tries `DESK_TOKENIZER_FALLBACK_URL`; if that also fails (or neither is
+    configured), falls back to a chars/4 estimate. Never raises — the
+    caller can use the result as a placeholder size unconditionally."""
+    s = text or ""
+    chars4 = max(1, len(s) // 4) if s else 0
+    if not s:
+        return chars4
+    n = _tokenize_via(DESK_TOKENIZER_URL, s)
+    if n is not None:
+        return n
+    n = _tokenize_via(DESK_TOKENIZER_FALLBACK_URL, s)
+    if n is not None:
+        return n
+    return chars4
 
 
 # --- loud overflow diagnostic ----------------------------------------------
