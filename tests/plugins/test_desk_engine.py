@@ -142,6 +142,99 @@ def test_recall_of_never_archived_block_errors(engine):
     assert "not in the archive" in r["error"]
 
 
+def test_archive_foreign_id_succeeds_with_context_local_description(engine):
+    # Cross-session scenario: a paper id p999 was created and archived in some
+    # OTHER session — its content lives in the global desk-archive store. The
+    # model in this session sees the [p999] reference (via session_search,
+    # quoted text, etc.) and archives it. Paper ids are global and the archive
+    # store is shared; the description is the CURRENT session's context-local
+    # annotation — why does THIS paper matter in THIS work? — and lives in
+    # the tool-result message (visible to future iterations of this session)
+    # without touching the originating session's archived placeholder.
+    import desk_core
+    (desk_core.archive_dir() / "p999.txt").write_text(
+        "[p999] content from another session", encoding="utf-8")
+    msgs_before = [{"role": "user", "content": "saw [p999] mentioned in session_search"}]
+    archive_file_before = (desk_core.archive_dir() / "p999.txt").read_text(encoding="utf-8")
+
+    desc = "cross-ref from earlier styckjunkaren analysis"
+    r = json.loads(engine.handle_tool_call(
+        "archive",
+        {"target": "p999", "description": desc},
+        messages=msgs_before))
+
+    assert "error" not in r, f"expected success, got error: {r}"
+    # The success result carries the context-local description, so a future
+    # iteration of this session reading the conversation history can see why
+    # the paper was archived in THIS context.
+    assert "acknowledged" in r["result"]
+    assert desc in r["result"]
+    # No file write on this path — originating session's content unchanged.
+    assert (desk_core.archive_dir() / "p999.txt").read_text(encoding="utf-8") == \
+        archive_file_before
+
+
+def test_archive_foreign_id_requires_description(engine):
+    # Even on the cross-session path the description is REQUIRED. It's
+    # context-local — describes why this paper matters in the current
+    # session's work — so omitting it isn't allowed any more than it would
+    # be for a local archive. The error message explicitly explains the
+    # context-local intent so the model knows what to provide.
+    import desk_core
+    (desk_core.archive_dir() / "p777.txt").write_text(
+        "[p777] some prior session content", encoding="utf-8")
+    msgs = [{"role": "user", "content": "saw [p777] in session_search"}]
+
+    # Missing description
+    r = json.loads(engine.handle_tool_call(
+        "archive", {"target": "p777"}, messages=msgs))
+    assert "error" in r
+    assert "description is required" in r["error"]
+    assert "current context" in r["error"]  # signals context-local intent
+
+    # Empty/whitespace description
+    r = json.loads(engine.handle_tool_call(
+        "archive", {"target": "p777", "description": "   "}, messages=msgs))
+    assert "error" in r
+    assert "description is required" in r["error"]
+
+
+def test_archive_foreign_id_with_no_archive_file_still_errors(engine):
+    # If the id is neither on the local desk NOR in the global archive store,
+    # the original "no paper on the desk" rejection still applies. Lets the
+    # model distinguish "you typo'd / hallucinated an id" from "this id is
+    # already globally archived".
+    msgs = [{"role": "user", "content": "hi"}]
+    r = json.loads(engine.handle_tool_call(
+        "archive",
+        {"target": "p1234", "description": "won't reach the description check"},
+        messages=msgs))
+    assert "error" in r
+    assert "no paper p1234 on the desk" in r["error"]
+
+
+def test_archive_foreign_id_requires_visibility_in_context(engine):
+    # Even if the paper file exists in the global archive store, the model
+    # is only allowed the no-op success when the id is actually visible in
+    # the current context (a [pN] reference somewhere in the messages list).
+    # This guards against archiving ids the model merely invented that
+    # happen to exist in the global store.
+    import desk_core
+    (desk_core.archive_dir() / "p888.txt").write_text(
+        "content from elsewhere", encoding="utf-8")
+    # No [p888] reference anywhere in this session's messages.
+    msgs = [{"role": "user", "content": "tell me about styckjunkaren"}]
+    r = json.loads(engine.handle_tool_call(
+        "archive",
+        {"target": "p888", "description": "made-up id that happens to exist"},
+        messages=msgs))
+    assert "error" in r, f"expected rejection on invisible id, got: {r}"
+    assert "no paper p888 on the desk" in r["error"]
+    # Archive file is left intact.
+    assert (desk_core.archive_dir() / "p888.txt").read_text(encoding="utf-8") == \
+        "content from elsewhere"
+
+
 def test_shred_block_without_paired_tool_call(engine):
     # an assistant turn that has no tool_calls must be left untouched by shred
     msgs = [

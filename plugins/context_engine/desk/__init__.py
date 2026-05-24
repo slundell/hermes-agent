@@ -215,6 +215,50 @@ class DeskEngine(ContextEngine):
         target = _norm(raw_target)
 
         paper = self._find_paper(messages, target)
+
+        # Archive is idempotent against the global archive store: paper ids
+        # are global (one monotonic counter across all sessions) and the
+        # archive directory is shared, so when the model in *this* session
+        # asks to archive an id that's already in `desk-archive/<id>.txt` —
+        # e.g. a [pN] reference surfaced via session_search or quoted text
+        # from another session — it succeeds without writing the archive
+        # file again. No paper-id fork, no impact on the session that
+        # originally owned the paper.
+        #
+        # Two guards:
+        #   1. Visibility — the id must appear as `[pN]` in the current
+        #      messages list. Prevents archiving ids the model invented
+        #      that happen to exist in the global store.
+        #   2. Description — still required, with a CONTEXT-LOCAL meaning:
+        #      explain why *this paper matters in your current context*,
+        #      not what the paper universally is. Different sessions can
+        #      and should give the same paper different descriptions; the
+        #      description lives in this session's tool-result message
+        #      (and is therefore visible to future iterations of this
+        #      session) — never propagated to the originating session.
+        if name == "archive" and paper is None:
+            archive_file = desk_core.archive_dir() / f"{target}.txt"
+            bracketed = f"[{target}]"
+            visible_in_context = any(
+                bracketed in desk_core.content_str(m) for m in messages
+            )
+            if archive_file.exists() and visible_in_context:
+                desc = str(args.get("description") or "").strip()
+                if not desc:
+                    return json.dumps({"error":
+                        f"description is required — even for {target} which "
+                        "is already in the global archive store, describe "
+                        "why this paper matters in YOUR current context "
+                        "(e.g. 'cross-ref from earlier styckjunkaren "
+                        "analysis'). The description stays local to this "
+                        "session; it does not modify the originating "
+                        "session's archived placeholder."})
+                desc = desc[:150]  # match local-placeholder cap
+                return json.dumps({"result":
+                    f"{target} acknowledged — already in the global archive "
+                    f"store (not on this desk). Your context-local note: "
+                    f"{desc}. The originating session's paper is unchanged."})
+
         if paper is None:
             return json.dumps({"error": f"no paper {target} on the desk"})
         content = desk_core.content_str(paper)
