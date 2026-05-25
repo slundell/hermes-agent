@@ -1,0 +1,7 @@
+name: document_read
+version: 1.0.0
+description: "Tika-backed document reader — extract text from PDF, .doc/.docx, .xls/.xlsx, .ppt/.pptx, RTF, and ODF files (with Tesseract OCR for image-only PDFs) and return it in read_file's line-numbered/paginated shape. Hands the file body to Apache Tika at $TIKA_URL. wpu-fork addition; not upstream."
+author: wpu
+kind: backend
+provides_tools:
+  - document_read
