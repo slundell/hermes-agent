@@ -406,11 +406,42 @@ def _venv_pip_install(specs: tuple[str, ...], *, timeout: int = 300) -> _Install
             capture_output=True, text=True, timeout=timeout,
             stdin=subprocess.DEVNULL,
         )
+        if r.returncode != 0 and _is_pep_668_refusal(r.stderr or ""):
+            # PEP 668 "externally-managed-environment" — running against
+            # a Python that pip considers system-managed (e.g. Ubuntu
+            # 24.04's /usr/bin/python3 when not inside a venv, typically
+            # in containerized non-root deploys). Retry once with
+            # --break-system-packages: harmless when actually inside a
+            # venv (pip ignores the flag there), and the right
+            # behaviour in a container where the image is the SSOT and
+            # we explicitly want to install into the system site-
+            # packages. The retry is bounded to PEP 668 only; other
+            # failures (network, PyPI quarantine, version conflict) still
+            # surface unmodified.
+            logger.info(
+                "pip refused install (PEP 668); retrying with "
+                "--break-system-packages"
+            )
+            r = subprocess.run(
+                pip_cmd + ["install", "--break-system-packages", *specs],
+                capture_output=True, text=True, timeout=timeout,
+            )
         return _InstallResult(r.returncode == 0, r.stdout or "", r.stderr or "")
     except subprocess.TimeoutExpired as e:
         return _InstallResult(False, "", f"pip install timed out: {e}")
     except Exception as e:
         return _InstallResult(False, "", f"pip install failed: {e}")
+
+
+def _is_pep_668_refusal(stderr: str) -> bool:
+    """Detect pip's PEP 668 'externally-managed-environment' refusal.
+
+    pip emits a stable phrase ('error: externally-managed-environment')
+    when refusing to install into a system-managed Python without
+    --break-system-packages. We pattern-match on the phrase rather than
+    on the exit code because pip uses the same generic non-zero exit
+    for many failure modes — we only want to retry for this one."""
+    return "externally-managed-environment" in stderr
 
 
 # =============================================================================
