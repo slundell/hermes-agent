@@ -244,11 +244,21 @@ NOTES = {
     "clean": "[desk: clean]",
     "notice": "[desk: notice — filling up; archive a spent paper when you can. shred is unavailable below urgent.]",
     "urgent": "[desk: urgent — nearly full; archive a spent paper before continuing. shred is now available.]",
-    "forced": "[desk: forced — full; archive or shred spent papers now (only archive and shred are usable until you make room).]",
+    "forced": "[desk: forced — full; archive/shred spent papers, or commit findings before replying via write_file (disk) or memory action=add (cross-session) — those are the only tools usable until you make room.]",
 }
-# Tools permitted at the forced level — context-REDUCING tidy ops only.
-# `recall` is excluded: it grows the desk.
-FORCED_TIDY_TOOLS = {"archive", "shred"}
+# Tools permitted at the forced level. Two roles:
+#   - context-REDUCING tidy ops: archive, shred. Required to make room.
+#   - persistence escape hatches: write_file (disk), memory (cross-session
+#     facts). At forced the model can commit a synthesis before the turn
+#     ends, so it isn't trapped in an archive/shred loop with no way to
+#     wrap up. Memory's actions (add/replace/remove) all return small
+#     confirmations — safe to allow by name. fact_store is intentionally
+#     NOT here because its search/probe/reason actions are context-
+#     growing and name-only whitelisting can't separate them from
+#     action=add.
+# Read-side tools (recall, read_file, search_files, fact_store search,
+# web fetches) are excluded: they grow the desk.
+FORCED_TIDY_TOOLS = {"archive", "shred", "write_file", "memory"}
 
 
 def fill_fraction(tokens: float, live_msgs: int = 0) -> float:

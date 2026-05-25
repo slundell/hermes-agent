@@ -190,9 +190,56 @@ def _level_file(session_id):
     return desk_core.state_dir() / f"{session_id or 'default'}.level"
 
 
+# Curator/reviewer prompt prefix — all three of the per-turn review
+# prompts (memory, skill, combined) start with this exact phrase, and
+# the background reviewer (agent/background_review.py) appends one of
+# them as a user message to a fork of the parent's conversation_history.
+# When the desk hook sees that message in the history, it knows it's
+# running on behalf of the reviewer fork, not the main agent. The
+# reviewer should not be gated by the desk: its job is to update the
+# skill library (a different objective from tidying the desk), and the
+# desk's forced-tool whitelist would trap it in archive/shred ops just
+# the same way it can trap the main agent. The fork shares session_id
+# with its parent so we can't tell them apart on that axis alone.
+_REVIEW_PROMPT_PREFIX = "Review the conversation above"
+
+
+def _is_reviewer_call(msgs):
+    """True when this pre_llm_call is for the background-review fork.
+
+    Detected by scanning recent user messages for the curator prompt
+    prefix. Walks from the tail (review prompt is at/near the end of the
+    fork's history) and bounds the scan so we don't pay O(N) on long
+    main-agent histories that never contain the sentinel."""
+    if not msgs:
+        return False
+    # 32 covers the prompt + a normal reviewer's tool-call walk; the
+    # prompt remains in history as the fork iterates.
+    for m in reversed(msgs[-32:]):
+        if m.get("role") != "user":
+            continue
+        c = m.get("content", "")
+        if isinstance(c, list):
+            c = " ".join(str(p.get("text", "")) for p in c
+                         if isinstance(p, dict))
+        if isinstance(c, str) and c.lstrip().startswith(
+                _REVIEW_PROMPT_PREFIX):
+            return True
+    return False
+
+
 def _on_pre_llm_call(session_id="", conversation_history=None, **_):
     msgs = conversation_history or []
     sid = session_id or "default"
+    # Reviewer fork: do not gate it as if it were the main agent. The
+    # reviewer has its own bounded iteration budget and ends with a
+    # text response, so it cannot blow context further than the parent
+    # already had. Clear any stale per-thread whitelist (defensive —
+    # the reviewer runs in its own thread, but explicit-clear keeps
+    # the contract clean) and return without an injected note.
+    if _is_reviewer_call(msgs):
+        clear_thread_tool_whitelist()
+        return None
     chars4_now = sum(_msg_chars(m) for m in msgs) // 4
     # Estimate this-call's real prompt tokens. Prefer the calibrated baseline
     # (real_baseline + delta from chars/4) so growth WITHIN a turn shows up in

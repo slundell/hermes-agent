@@ -258,3 +258,108 @@ def test_calibration_cleared_on_session_reset(desk):
     assert "cal3" not in desk._TOK_BASELINE
     assert "cal3" not in desk._PENDING_CHARS4
     assert "cal3" not in desk._LAST_PROMPT_TOKENS
+
+
+# --- reviewer-fork detection (skip the forced-tool whitelist) -------------
+
+
+def test_is_reviewer_call_detects_curator_prompt(desk):
+    msgs = [
+        {"role": "user", "content": "find styckjunkaren"},
+        {"role": "assistant", "content": "ok"},
+        {"role": "tool", "content": "[p1] result"},
+        {"role": "user", "content":
+            "Review the conversation above and update the skill library. "
+            "Be ACTIVE — most sessions produce..."},
+    ]
+    assert desk._is_reviewer_call(msgs) is True
+
+
+def test_is_reviewer_call_false_for_main_agent_history(desk):
+    msgs = [
+        {"role": "user", "content": "find styckjunkaren"},
+        {"role": "assistant", "content": "ok"},
+        {"role": "user", "content": "thanks, do x"},
+    ]
+    assert desk._is_reviewer_call(msgs) is False
+
+
+def test_is_reviewer_call_handles_list_content(desk):
+    """Anthropic-style multipart content blocks must also match."""
+    msgs = [
+        {"role": "user", "content": [
+            {"type": "text", "text":
+                "Review the conversation above and consider saving to "
+                "memory if appropriate.\n\nFocus on:..."},
+        ]},
+    ]
+    assert desk._is_reviewer_call(msgs) is True
+
+
+def test_reviewer_call_skips_forced_whitelist(desk, monkeypatch):
+    """At a forced-band fill, a reviewer-fork pre_llm_call must NOT set
+    the tidy-tools whitelist — the reviewer has its own job (skill-
+    library update) and should run unrestricted."""
+    import desk_core
+    set_calls = []
+    clear_calls = []
+    monkeypatch.setattr(desk, "set_thread_tool_whitelist",
+                        lambda tools, **k: set_calls.append(tools))
+    monkeypatch.setattr(desk, "clear_thread_tool_whitelist",
+                        lambda: clear_calls.append(True))
+    # Put the desk at forced first (main-agent path).
+    desk._on_post_api_request(
+        usage={"prompt_tokens": int(desk_core.EFFECTIVE_CTX * 1.10)},
+        session_id="r1")
+    # Reviewer-fork call (same session_id, curator prompt in history).
+    out = desk._on_pre_llm_call(session_id="r1", conversation_history=[
+        {"role": "user", "content": "earlier user msg"},
+        {"role": "assistant", "content": "earlier reply"},
+        {"role": "user", "content":
+            "Review the conversation above and update the skill library."},
+    ])
+    # No state-note injected, no whitelist set, whitelist cleared
+    # defensively.
+    assert out is None
+    assert set_calls == []
+    assert clear_calls == [True]
+
+
+def test_reviewer_detection_bounded_to_recent_tail(desk):
+    """The scan walks only the recent tail so long main-agent histories
+    that happen to contain an old (now-stale) sentinel string aren't
+    misclassified."""
+    msgs = [{"role": "user", "content":
+             "Review the conversation above and ..."}]
+    msgs += [{"role": "tool", "content": f"[p{i}] r"} for i in range(60)]
+    msgs.append({"role": "user", "content": "normal request"})
+    assert desk._is_reviewer_call(msgs) is False
+
+
+# --- write_file as a forced-band escape hatch -----------------------------
+
+
+def test_forced_tidy_tools_has_tidy_and_persistence_ops():
+    """The forced whitelist mixes two roles: tidy ops (archive/shred) to
+    make room, plus persistence escape hatches (write_file, memory) so
+    the model can commit a synthesis before the turn ends instead of
+    being trapped in a pure archive/shred loop. fact_store is
+    intentionally NOT included — its search/probe actions grow context
+    and name-only whitelisting can't separate them from action=add."""
+    import desk_core
+    assert "archive" in desk_core.FORCED_TIDY_TOOLS
+    assert "shred" in desk_core.FORCED_TIDY_TOOLS
+    assert "write_file" in desk_core.FORCED_TIDY_TOOLS
+    assert "memory" in desk_core.FORCED_TIDY_TOOLS
+    assert "fact_store" not in desk_core.FORCED_TIDY_TOOLS
+    assert "read_file" not in desk_core.FORCED_TIDY_TOOLS
+    assert "recall" not in desk_core.FORCED_TIDY_TOOLS
+
+
+def test_forced_note_enumerates_persistence_channels():
+    """The forced-band note must tell the model what escape hatches are
+    available, otherwise it won't discover them on its own."""
+    import desk_core
+    note = desk_core.NOTES["forced"]
+    assert "write_file" in note
+    assert "memory" in note
