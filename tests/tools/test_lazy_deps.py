@@ -405,3 +405,100 @@ class TestRefreshActiveFeatures:
         result = ld.refresh_active_features()
         assert result["a.ok"] == "current"
         assert result["b.fail"].startswith("failed:")
+
+
+# ---------------------------------------------------------------------------
+# PEP 668 retry — _venv_pip_install transparently re-tries with
+# --break-system-packages when pip refuses with the externally-managed
+# error. Needed for containerized non-root deploys where /usr/bin/python3
+# is system-managed but the image is the SSOT.
+# ---------------------------------------------------------------------------
+
+
+class _FakeCompleted:
+    def __init__(self, rc: int, out: str = "", err: str = ""):
+        self.returncode = rc
+        self.stdout = out
+        self.stderr = err
+
+
+class TestPEP668Retry:
+
+    _PEP668_STDERR = (
+        "error: externally-managed-environment\n\n"
+        "× This environment is externally managed\n"
+        "╰─> To install Python packages system-wide, try apt install..."
+    )
+
+    def test_is_pep_668_refusal_matches_phrase(self):
+        assert ld._is_pep_668_refusal(self._PEP668_STDERR) is True
+
+    def test_is_pep_668_refusal_ignores_other_failures(self):
+        # Network and PyPI failures should NOT trigger the retry path —
+        # we only re-try for the one specific refusal.
+        assert ld._is_pep_668_refusal(
+            "ERROR: Could not find a version that satisfies "
+            "the requirement bogus-pkg") is False
+        assert ld._is_pep_668_refusal("network timed out") is False
+        assert ld._is_pep_668_refusal("") is False
+
+    def test_pip_install_retries_with_break_system_packages_on_pep668(
+            self, monkeypatch):
+        """When the first pip install fails with PEP 668, _venv_pip_install
+        must re-issue it with --break-system-packages and return the
+        retry's result. Skip the uv tier (Tier 1) so we exercise the
+        pip path (Tier 2)."""
+        monkeypatch.setattr(ld.shutil, "which",
+                            lambda name: None if name == "uv" else "/x")
+        calls = []
+
+        def fake_run(argv, **kw):
+            calls.append(list(argv))
+            # First call: pip --version probe → succeeds (pip present)
+            if argv[1:4] == ["-m", "pip", "--version"]:
+                return _FakeCompleted(0, "pip 24.0", "")
+            # First real install call: PEP 668 refusal
+            if argv[1:4] == ["-m", "pip", "install"] and "--break-system-packages" not in argv:
+                return _FakeCompleted(1, "", self._PEP668_STDERR)
+            # Retry: contains --break-system-packages → succeed
+            if "--break-system-packages" in argv:
+                return _FakeCompleted(0, "ok", "")
+            raise AssertionError(f"unexpected argv: {argv}")
+
+        monkeypatch.setattr(ld.subprocess, "run", fake_run)
+        result = ld._venv_pip_install(("firecrawl-py==4.17.0",))
+        assert result.success is True
+        # Two pip-install invocations: the refused one + the retry.
+        installs = [c for c in calls if c[1:4] == ["-m", "pip", "install"]]
+        assert len(installs) == 2
+        assert "--break-system-packages" not in installs[0]
+        assert "--break-system-packages" in installs[1]
+        # The retry must still include the original spec.
+        assert "firecrawl-py==4.17.0" in installs[1]
+
+    def test_pip_install_does_not_retry_on_non_pep668_failures(
+            self, monkeypatch):
+        """A generic pip failure (network, version conflict) must NOT
+        trigger the --break-system-packages retry — those errors need
+        to surface unmodified so callers see the real reason."""
+        monkeypatch.setattr(ld.shutil, "which",
+                            lambda name: None if name == "uv" else "/x")
+        calls = []
+
+        def fake_run(argv, **kw):
+            calls.append(list(argv))
+            if argv[1:4] == ["-m", "pip", "--version"]:
+                return _FakeCompleted(0, "pip 24.0", "")
+            if argv[1:4] == ["-m", "pip", "install"]:
+                return _FakeCompleted(
+                    1, "", "ERROR: Could not find a version that "
+                           "satisfies the requirement bogus-pkg")
+            raise AssertionError(f"unexpected argv: {argv}")
+
+        monkeypatch.setattr(ld.subprocess, "run", fake_run)
+        result = ld._venv_pip_install(("bogus-pkg==1.0",))
+        assert result.success is False
+        installs = [c for c in calls if c[1:4] == ["-m", "pip", "install"]]
+        assert len(installs) == 1  # No retry — exactly one install attempt.
+        assert "--break-system-packages" not in installs[0]
+        assert "Could not find a version" in result.stderr
