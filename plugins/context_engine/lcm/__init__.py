@@ -432,8 +432,14 @@ class LcmContextEngine(ContextEngine):
         base_url: str = "",
         api_key: str = "",
         provider: str = "",
+        api_mode: str = "",
     ) -> None:
-        """Propagate model switch to the engine internals."""
+        """Propagate model switch to the engine internals.
+
+        api_mode was added to the ContextEngine ABC in upstream 8b2adead7;
+        the LCM PR predates it. Accepted-but-unused — LCM's summary path
+        doesn't branch on api_mode (anthropic / chat-completions / codex).
+        """
         self.context_length = context_length
         self.threshold_tokens = int(context_length * self._config.tau_soft)
         self._engine.model = model
