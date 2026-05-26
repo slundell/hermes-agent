@@ -130,7 +130,9 @@ class DeskEngine(ContextEngine):
 
     # -- compaction interface: there is no synchronous compaction -----------
     def update_model(self, model, context_length, base_url="", api_key="",
-                     provider="") -> None:
+                     provider="", api_mode="") -> None:
+        # api_mode added to ABC in upstream 8b2adead7; accepted-but-unused here
+        # because the desk doesn't summarise (no auxiliary LLM call to route).
         self.context_length = context_length or 0
         # No compaction threshold exists. Pin threshold_tokens to the window
         # itself so the preflight check (`tokens >= threshold_tokens`) only
