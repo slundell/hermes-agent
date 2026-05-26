@@ -41,6 +41,35 @@ def desk_home() -> Path:
 PAPER_ID_RE = re.compile(r"^\s*\[(p\d+)\]")
 _STAMPED_RE = re.compile(r"^\s*\[p\d+\]")
 
+# Upstream 0dee92df2 (promptware defense) wraps results from web_extract /
+# web_search / browser_* / mcp_* in a three-line envelope:
+#
+#     <untrusted_tool_result source="…">
+#     The following content was retrieved from an external source. […]
+#
+#     <actual content, which is where our [pN] stamp lives>
+#     </untrusted_tool_result>
+#
+# The desk's _stamp hook runs BEFORE that wrapper is applied, so the stamp
+# ends up inside it.  Strip the wrapper before parsing so paper_id / is_stamped
+# still recognise the id.  DOTALL because the instruction line is long but
+# always a single line; we accept any non-greedy preamble up to the first
+# blank line.
+_UNTRUSTED_WRAP_RE = re.compile(
+    r"^\s*<untrusted_tool_result\b[^>]*>\s*\n.*?\n\s*\n",
+    re.DOTALL,
+)
+
+
+def _strip_untrusted_wrapper(content: str) -> str:
+    """Return content with the upstream <untrusted_tool_result …> envelope
+    peeled off if present, so paper-id parsing still works on the inner
+    payload. No-op for unwrapped content (the common case)."""
+    if not content or "<untrusted_tool_result" not in content[:64]:
+        return content
+    m = _UNTRUSTED_WRAP_RE.match(content)
+    return content[m.end():] if m else content
+
 
 def content_str(msg) -> str:
     """Flatten an OpenAI-format message's content to a plain string."""
@@ -55,13 +84,14 @@ def content_str(msg) -> str:
 def paper_id(content) -> "str | None":
     """Return the bare paper id ('p37') stamped on a content string, else None."""
     s = content if isinstance(content, str) else content_str(content)
+    s = _strip_untrusted_wrapper(s)
     m = PAPER_ID_RE.match(s)
     return m.group(1) if m else None
 
 
 def is_stamped(content: str) -> bool:
     """True if a tool-result string already carries a [bN] id."""
-    return bool(_STAMPED_RE.match(content or ""))
+    return bool(_STAMPED_RE.match(_strip_untrusted_wrapper(content or "")))
 
 
 def paper_ids_on_desk(messages) -> "list[int]":
