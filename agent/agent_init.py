@@ -1396,19 +1396,10 @@ def init_agent(
         pass
 
     if _engine_name != "compressor":
-        # Forward engine-specific config blocks from config.yaml into the
-        # plugin's register(**kwargs).  Without this, user tuning under
-        # e.g. `lcm: { tau_soft: 0.6, … }` in config.yaml is silently
-        # ignored.  Only the matching engine's block is passed through; a
-        # plugin whose register() doesn't accept the kwarg ignores it
-        # (load_context_engine forwards via **kwargs).
-        _engine_kwargs: dict = {}
-        if _engine_name == "lcm" and isinstance(_agent_cfg, dict):
-            _engine_kwargs["lcm_config"] = _agent_cfg.get("lcm", {}) or {}
         # Try loading from plugins/context_engine/<name>/
         try:
             from plugins.context_engine import load_context_engine
-            _selected_engine = load_context_engine(_engine_name, **_engine_kwargs)
+            _selected_engine = load_context_engine(_engine_name)
         except Exception as _ce_load_err:
             _ra().logger.debug("Context engine load from plugins/context_engine/: %s", _ce_load_err)
 

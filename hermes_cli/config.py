@@ -1358,21 +1358,14 @@ DEFAULT_CONFIG = {
         "max_ms": 2500,
     },
     
-       # Context engine -- controls how the context window is managed when
+    # Context engine -- controls how the context window is managed when
     # approaching the model's token limit.
     # "compressor" = built-in lossy summarization (default).
-    # "lcm" = Lossless Context Management (reversible compression via DAG).
-    # "rlm" = Recursive Language Model (REPL-based context interaction).
-    # For LCM+RLM mode: set engine: lcm and rlm: true
-    # The engine must be installed as a plugin in plugins/context_engine/<name>/
-    # or ~/.hermes/plugins/.
+    # Set to a plugin name to activate an alternative engine (e.g. "lcm"
+    # for Lossless Context Management).  The engine must be installed as
+    # a plugin in plugins/context_engine/<name>/ or ~/.hermes/plugins/.
     "context": {
         "engine": "compressor",
-        "rlm": False,          # Enable RLM companion mode when engine is "lcm"
-        "rlm_config": {        # RLM-specific settings (ignored when rlm is False)
-            "max_iterations": 20,    # Max REPL iterations before auto-terminate
-            "output_limit": 8192,    # Max output chars per REPL execution
-        },
     },
 
     # Persistent memory -- bounded curated memory injected into system prompt
@@ -1943,6 +1936,7 @@ DEFAULT_CONFIG = {
         "servers": {},
     },
 
+
     # X (Twitter) Search via xAI's built-in x_search Responses tool.
     # The tool registers when xAI credentials are available (SuperGrok
     # OAuth or XAI_API_KEY) AND the x_search toolset is enabled in
@@ -2020,17 +2014,6 @@ DEFAULT_CONFIG = {
     "paste_collapse_threshold_fallback": 5,
     "paste_collapse_char_threshold": 2000,
 
-    # LCM (Lossless Context Management) engine settings.
-    # Only used when context.engine is set to "lcm".
-    # Three-layer memory: L1 Hot (LLM summarization), L2 Warm (DAM), L3 Cold (HRR).
-    "lcm": {
-        "enabled": True,
-        "tau_soft": 0.50,           # Soft threshold — trigger async compaction
-        "tau_hard": 0.85,           # Hard threshold — trigger blocking compaction
-        "deterministic_target": 512,
-        "protect_last_n": 4,
-        "summary_model": "",        # Empty = use main configured model
-    },
 
     # Config schema version - bump this when adding new required fields
     "_config_version": 24,
