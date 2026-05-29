@@ -152,6 +152,22 @@ Pick the closest existing category. Don't invent new top-level categories casual
 
 7. **Linking to skills that don't exist in-repo.** `related_skills: [some-user-local-skill]` works for you but breaks for other clones. Prefer only in-repo links.
 
+8. **Unquoted colons inside `description:` (or any other unquoted string value).** YAML treats `:` as a key/value separator inside an unquoted scalar, so this fails to parse:
+
+   ```yaml
+   description: Handling cold case research: questioning assumptions
+   ```
+
+   The validator returns `YAML frontmatter parse error: mapping values are not allowed here`. Fix by wrapping the value in single or double quotes:
+
+   ```yaml
+   description: "Handling cold case research: questioning assumptions"
+   ```
+
+   Same rule applies to any value containing `:`, `#`, `&`, `*`, `!`, `|`, `>`, `'`, `"`, `%`, `@`, or backticks — quote the whole value. Single quotes are simplest because they don't require escaping anything except a literal single quote (which doubles: `it''s`). When in doubt, quote.
+
+   Multi-line descriptions can also use the YAML block scalar form `description: |` followed by indented lines — colons inside the block don't need quoting because the block syntax takes precedence over the inline mapping syntax. Useful when the description spans several sentences.
+
 ## Verification Checklist
 
 - [ ] File is at `skills/<category>/<name>/SKILL.md` (not in `~/.hermes/skills/`)
