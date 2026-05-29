@@ -4810,6 +4810,24 @@ def call_llm(
     effective_extra_body = _get_task_extra_body(task)
     effective_extra_body.update(extra_body or {})
 
+    # Per-task max_tokens floor (config raises ceilings — never lowers them).
+    # When the aux LLM is a reasoning model, internal reasoning tokens count
+    # toward `max_tokens` but never appear in `choices[0].message.content`.
+    # Callers (e.g. hermes-lcm passing `token_budget * 2`) compute their
+    # ceiling assuming non-reasoning output, so the visible summary gets
+    # cut off mid-sentence on a reasoning model.  Operators set
+    # `auxiliary.<task>.max_tokens: <floor>` in config.yaml to declare
+    # "the deployed model needs at least this much headroom".  The caller's
+    # value still wins when larger — so a caller that genuinely wants a
+    # bigger output (e.g. web_extract returning a long extraction) isn't
+    # clipped to the config floor.
+    if task:
+        _task_cfg = _get_auxiliary_task_config(task)
+        _cfg_mt = _task_cfg.get("max_tokens")
+        if isinstance(_cfg_mt, (int, float)) and _cfg_mt > 0:
+            if max_tokens is None or _cfg_mt > max_tokens:
+                max_tokens = int(_cfg_mt)
+
     if task == "vision":
         effective_provider, client, final_model = resolve_vision_provider_client(
             provider=resolved_provider if resolved_provider != "auto" else provider,
@@ -5267,6 +5285,24 @@ async def async_call_llm(
         task, provider, model, base_url, api_key)
     effective_extra_body = _get_task_extra_body(task)
     effective_extra_body.update(extra_body or {})
+
+    # Per-task max_tokens floor (config raises ceilings — never lowers them).
+    # When the aux LLM is a reasoning model, internal reasoning tokens count
+    # toward `max_tokens` but never appear in `choices[0].message.content`.
+    # Callers (e.g. hermes-lcm passing `token_budget * 2`) compute their
+    # ceiling assuming non-reasoning output, so the visible summary gets
+    # cut off mid-sentence on a reasoning model.  Operators set
+    # `auxiliary.<task>.max_tokens: <floor>` in config.yaml to declare
+    # "the deployed model needs at least this much headroom".  The caller's
+    # value still wins when larger — so a caller that genuinely wants a
+    # bigger output (e.g. web_extract returning a long extraction) isn't
+    # clipped to the config floor.
+    if task:
+        _task_cfg = _get_auxiliary_task_config(task)
+        _cfg_mt = _task_cfg.get("max_tokens")
+        if isinstance(_cfg_mt, (int, float)) and _cfg_mt > 0:
+            if max_tokens is None or _cfg_mt > max_tokens:
+                max_tokens = int(_cfg_mt)
 
     if task == "vision":
         effective_provider, client, final_model = resolve_vision_provider_client(
