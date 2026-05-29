@@ -288,6 +288,41 @@ def _validate_category(category: Optional[str]) -> Optional[str]:
     return None
 
 
+def _diagnose_unquoted_colon(yaml_text: str, exc: "yaml.YAMLError") -> Optional[Tuple[str, str]]:
+    """When yaml.safe_load fails with 'mapping values are not allowed here',
+    try to identify the offending line and return (key, value) so we can
+    suggest a quoted form.  Returns None if we can't confidently identify it.
+
+    The classic shape is:
+        description: Some text: more text
+    where the second `:` is interpreted as a nested mapping separator.  Walk
+    the YAML text line by line; the first line with two unquoted colons that
+    isn't a block-scalar header (`|`, `>`) is the culprit.
+    """
+    for raw in yaml_text.splitlines():
+        # Skip lines that are obviously fine.
+        line = raw.rstrip()
+        if not line or line.lstrip().startswith("#"):
+            continue
+        # Find the first `:` followed by whitespace or end-of-line — that's
+        # the key/value split YAML actually uses.
+        m = re.match(r'^(\s*)([A-Za-z_][A-Za-z0-9_\-]*)\s*:\s*(.+)$', line)
+        if not m:
+            continue
+        indent, key, value = m.group(1), m.group(2), m.group(3)
+        # Block-scalar headers (| or >) are not mapping continuations.
+        if value.startswith(("|", ">")):
+            continue
+        # Already quoted — not the problem.
+        if (value.startswith("'") and value.endswith("'")) or \
+           (value.startswith('"') and value.endswith('"')):
+            continue
+        # The trigger condition: at least one more colon inside the value.
+        if ":" in value:
+            return key, value
+    return None
+
+
 def _validate_frontmatter(content: str) -> Optional[str]:
     """
     Validate that SKILL.md content has proper frontmatter with required fields.
@@ -308,7 +343,29 @@ def _validate_frontmatter(content: str) -> Optional[str]:
     try:
         parsed = yaml.safe_load(yaml_content)
     except yaml.YAMLError as e:
-        return f"YAML frontmatter parse error: {e}"
+        # Detect the most common curator/agent mistake: an unquoted string value
+        # that contains a colon (e.g. ``description: Cold case: questioning…``).
+        # YAML reads the second colon as a nested mapping separator and bails
+        # with "mapping values are not allowed here".  Surface a specific,
+        # actionable hint so the caller's next attempt fixes it on the first
+        # retry instead of looping on the same error.
+        hint = ""
+        msg = str(e)
+        if "mapping values are not allowed here" in msg:
+            offending = _diagnose_unquoted_colon(yaml_content, e)
+            if offending:
+                key, value = offending
+                escaped = value.replace("'", "''")
+                hint = (
+                    f"\n\nLikely cause: the value for `{key}` contains an "
+                    f"unquoted colon. Wrap the value in single quotes:\n"
+                    f"    {key}: '{escaped}'\n"
+                    f"YAML treats `:` as a key/value separator inside an "
+                    f"unquoted scalar. Same rule applies to values containing "
+                    f"`#`, `&`, `*`, `!`, `|`, `>`, `'`, `\"`, or backticks — "
+                    f"quote the whole value."
+                )
+        return f"YAML frontmatter parse error: {e}{hint}"
 
     if not isinstance(parsed, dict):
         return "Frontmatter must be a YAML mapping (key: value pairs)."
