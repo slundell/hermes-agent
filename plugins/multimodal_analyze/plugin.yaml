@@ -1,0 +1,8 @@
+name: multimodal_analyze
+version: 1.0.0
+description: "audio_analyze and video_analyze_frames tools — POST short audio clips (input_audio) and frame sequences (image_url[]) to the auxiliary.vision endpoint. Designed against gemma4-e4b on aina-media which accepts native input_audio blocks and multi-image_url frame sequences. wpu-fork addition; not upstream."
+author: wpu
+kind: backend
+provides_tools:
+  - audio_analyze
+  - video_analyze_frames
