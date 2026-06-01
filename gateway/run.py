@@ -5612,7 +5612,7 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             logger.info("Channel directory built: %d target(s)", ch_count)
         except Exception as e:
             logger.warning("Channel directory build failed: %s", e)
-        
+
         # Check if we're restarting after a /update command. If the update is
         # still running, keep watching so we notify once it actually finishes.
         notified = await self._send_update_notification()
@@ -8894,12 +8894,36 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
             session_entry.auto_reset_reason = None
 
         # Auto-load skill(s) for topic/channel bindings (Telegram DM Topics,
-        # Discord channel_skill_bindings).  Supports a single name or ordered list.
-        # Only inject on NEW sessions — ongoing conversations already have the
-        # skill content in their conversation history from the first message.
+        # Discord/Slack/Signal channel_skill_bindings) AND for the
+        # global `skills.always_preload` config — applies to every NEW
+        # gateway session regardless of platform/channel, in addition to
+        # any platform-specific binding. Ordering: globals first, then
+        # per-channel bindings (so per-channel skills can override/extend
+        # by listing the same name; dedup preserves first occurrence).
+        # Only inject on NEW sessions — ongoing conversations already have
+        # the skill content in their conversation history.
         _auto = getattr(event, "auto_skill", None)
-        if _is_new_session and _auto:
-            _skill_names = [_auto] if isinstance(_auto, str) else list(_auto)
+        _global_preload: list[str] = []
+        try:
+            _cfg = _load_gateway_config()
+            _skills_cfg = (_cfg.get("skills") or {}) if isinstance(_cfg, dict) else {}
+            _gp_raw = _skills_cfg.get("always_preload")
+            if isinstance(_gp_raw, str) and _gp_raw.strip():
+                _global_preload = [_gp_raw.strip()]
+            elif isinstance(_gp_raw, list):
+                _global_preload = [str(s).strip() for s in _gp_raw if str(s).strip()]
+        except Exception:
+            _global_preload = []
+        # Merge per-channel + global, dedupe (preserves first occurrence).
+        _merged_skills: list[str] = []
+        _seen_skills: set[str] = set()
+        for _src in (_global_preload, ([_auto] if isinstance(_auto, str) else list(_auto)) if _auto else []):
+            for _s in _src:
+                if _s and _s not in _seen_skills:
+                    _merged_skills.append(_s)
+                    _seen_skills.add(_s)
+        if _is_new_session and _merged_skills:
+            _skill_names = _merged_skills
             try:
                 from agent.skill_commands import _load_skill_payload, _build_skill_message
                 _combined_parts: list[str] = []
