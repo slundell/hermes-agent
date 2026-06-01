@@ -5986,12 +5986,19 @@ def _default_spawn(
         for sk in task.skills:
             if sk and sk != "kanban-worker":
                 cmd.extend(["--skills", sk])
+    # -m must land in the chat subparser's namespace, not the global one.
+    # Global -m before `chat` is captured by the parent parser, then
+    # silently overwritten with None by the chat subparser's redeclared
+    # `-m / --model` arg (both are registered via _inherited_flag in
+    # hermes_cli/_parser.py:248). Net effect: args.model = None, agent
+    # falls back to config.model.default (std). Empirically observed on
+    # 2026-05-29: workers spawned with `-m flash chat ...` ran on std.
+    # Putting `-m` after `chat` lands the value in the subparser's
+    # namespace where the agent's resolution path reads it.
+    cmd.append("chat")
     if task.model_override:
         cmd.extend(["-m", task.model_override])
-    cmd.extend([
-        "chat",
-        "-q", prompt,
-    ])
+    cmd.extend(["-q", prompt])
     # Redirect output to a per-task log under <board-root>/logs/.
     # Anchored at the board root (not the shared kanban root), so
     # `hermes kanban log` on a specific board reads its own file and
