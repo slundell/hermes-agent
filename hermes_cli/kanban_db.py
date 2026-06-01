@@ -5986,6 +5986,24 @@ def _default_spawn(
         for sk in task.skills:
             if sk and sk != "kanban-worker":
                 cmd.extend(["--skills", sk])
+    # Per-task model_override wins. If unset, fall back to the kanban-wide
+    # default from config (kanban.default_model). Keeps cache-thrash off
+    # the main slot: setting kanban.default_model: flash routes kanban
+    # workers to the 9b backend so the operator's main session keeps the
+    # std (27b) prefix cache warm. Has no effect on tasks that opt into
+    # an explicit override.
+    effective_model = task.model_override
+    if not effective_model:
+        try:
+            from hermes_cli.config import load_config
+            _cfg = load_config()
+            _kanban_cfg = _cfg.get("kanban") if isinstance(_cfg, dict) else None
+            if isinstance(_kanban_cfg, dict):
+                _dm = _kanban_cfg.get("default_model")
+                if isinstance(_dm, str) and _dm.strip():
+                    effective_model = _dm.strip()
+        except Exception:
+            pass
     # -m must land in the chat subparser's namespace, not the global one.
     # Global -m before `chat` is captured by the parent parser, then
     # silently overwritten with None by the chat subparser's redeclared
@@ -5996,8 +6014,8 @@ def _default_spawn(
     # Putting `-m` after `chat` lands the value in the subparser's
     # namespace where the agent's resolution path reads it.
     cmd.append("chat")
-    if task.model_override:
-        cmd.extend(["-m", task.model_override])
+    if effective_model:
+        cmd.extend(["-m", effective_model])
     cmd.extend(["-q", prompt])
     # Redirect output to a per-task log under <board-root>/logs/.
     # Anchored at the board root (not the shared kanban root), so
