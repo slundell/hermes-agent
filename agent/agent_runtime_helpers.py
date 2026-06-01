@@ -1145,8 +1145,22 @@ def extract_reasoning(agent, assistant_message) -> Optional[str]:
     
     # Combine all reasoning parts
     if reasoning_parts:
-        return "\n\n".join(reasoning_parts)
-    
+        combined = "\n\n".join(reasoning_parts)
+        # Scrub orphan tool-call XML that some providers (notably Qwen
+        # via aina-llm tap when the model emits an empty <think></think>
+        # immediately followed by <tool_call>{json}</tool_call>) leak
+        # into the reasoning field.  Without this, display.show_reasoning
+        # ships a literal "<tool_call>" code block to messaging users.
+        # Mirrors the salvage list in strip_inline_reasoning_blocks().
+        scrubbed = re.sub(
+            r'</?(?:tool_call|tool_calls|tool_result|'
+            r'function_call|function_calls)\b[^>]*>',
+            '',
+            combined,
+            flags=re.IGNORECASE,
+        ).strip()
+        return scrubbed or None
+
     return None
 
 
