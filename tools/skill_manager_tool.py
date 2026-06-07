@@ -323,6 +323,26 @@ def _diagnose_unquoted_colon(yaml_text: str, exc: "yaml.YAMLError") -> Optional[
     return None
 
 
+def _diagnose_leading_indicator(yaml_text: str) -> Optional[Tuple[int, str]]:
+    """When yaml.safe_load fails with 'while scanning an alias/anchor', find the
+    offending frontmatter line.  This is almost always markdown BODY content that
+    bled into the frontmatter (e.g. a ``**bold**`` line or a ``*`` bullet),
+    because a leading ``*`` is a YAML alias and ``&`` is an anchor.  Returns
+    (line_no, text) or None.
+    """
+    for i, raw in enumerate(yaml_text.splitlines(), start=1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        # A bare line starting with * or & (markdown bold/bullet bled in), or a
+        # key: value whose value starts with one of those indicators.
+        if line[0] in "*&":
+            return i, line
+        if re.match(r'^\s*[A-Za-z_][\w\-]*\s*:\s*[*&]', line):
+            return i, line
+    return None
+
+
 def _validate_frontmatter(content: str) -> Optional[str]:
     """
     Validate that SKILL.md content has proper frontmatter with required fields.
@@ -364,6 +384,20 @@ def _validate_frontmatter(content: str) -> Optional[str]:
                     f"unquoted scalar. Same rule applies to values containing "
                     f"`#`, `&`, `*`, `!`, `|`, `>`, `'`, `\"`, or backticks — "
                     f"quote the whole value."
+                )
+        elif "scanning an alias" in msg or "scanning an anchor" in msg:
+            offending = _diagnose_leading_indicator(yaml_content)
+            if offending:
+                ln, text = offending
+                hint = (
+                    f"\n\nLikely cause: frontmatter line {ln} starts with a YAML "
+                    f"indicator character:\n    {text[:80]}\n"
+                    f"YAML reads a leading `*` as an alias (and `&` as an anchor). "
+                    f"If this is markdown BODY content (e.g. `**bold**` or a `*` "
+                    f"bullet), it belongs AFTER the closing `---`, not inside the "
+                    f"frontmatter — check that your `---` fences wrap ONLY the "
+                    f"name/description/etc. If it's a real value, quote it: "
+                    f"`key: '...'`."
                 )
         return f"YAML frontmatter parse error: {e}{hint}"
 
@@ -1191,7 +1225,20 @@ SKILL_MANAGE_SCHEMA = {
             "action": {
                 "type": "string",
                 "enum": ["create", "patch", "edit", "delete", "write_file", "remove_file"],
-                "description": "The action to perform."
+                "description": (
+                    "The action to perform. REQUIRED params per action:\n"
+                    "• create  — name + content (full SKILL.md: '---' frontmatter with "
+                    "name/description, then the markdown body)\n"
+                    "• edit    — name + content (the COMPLETE updated SKILL.md; read it "
+                    "first with skill_view)\n"
+                    "• patch   — name + old_string + new_string (old_string must match the "
+                    "file EXACTLY and uniquely — read with skill_view first; optional "
+                    "file_path to patch a support file instead of SKILL.md)\n"
+                    "• write_file  — name + file_path + file_content (file_path under "
+                    "references/ templates/ scripts/ assets/)\n"
+                    "• remove_file — name + file_path\n"
+                    "• delete  — name (+ absorbed_into)"
+                )
             },
             "name": {
                 "type": "string",
