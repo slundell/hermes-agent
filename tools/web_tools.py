@@ -872,7 +872,7 @@ def web_search_tool(query: str, limit: int = 5) -> str:
 async def web_extract_tool(
     urls: List[str],
     format: str = None,
-    use_llm_processing: bool = True,
+    use_llm_processing: bool = False,
     model: Optional[str] = None,
     min_length: int = DEFAULT_MIN_LENGTH_FOR_SUMMARIZATION
 ) -> str:
@@ -885,7 +885,7 @@ async def web_extract_tool(
     Args:
         urls (List[str]): List of URLs to extract content from
         format (str): Desired output format ("markdown" or "html", optional)
-        use_llm_processing (bool): Whether to process content with LLM for summarization (default: True)
+        use_llm_processing (bool): Summarize the full page via the auxiliary LLM (Claude Haiku) into a digest covering the whole page, vs raw markdown. Function-signature default is False for direct programmatic callers; the web_extract TOOL (registry handler) defaults this to True so the agent gets full-page summaries instead of ~100k-char-truncated raw. Pass False for raw verbatim (exact quotes/code/tables).
         model (Optional[str]): The model to use for LLM processing (defaults to current auxiliary backend model)
         min_length (int): Minimum content length to trigger LLM processing (default: 5000)
 
@@ -1308,7 +1308,7 @@ WEB_SEARCH_SCHEMA = {
 
 WEB_EXTRACT_SCHEMA = {
     "name": "web_extract",
-    "description": "Extract content from web page URLs. Returns page content in markdown format. Also works with PDF URLs (arxiv papers, documents, etc.) — pass the PDF link directly and it converts to markdown text. Pages under 5000 chars return full markdown; larger pages are LLM-summarized and capped at ~5000 chars per page. Pages over 2M chars are refused. If a URL fails or times out, use the browser tool to access it instead.",
+    "description": "Extract content from web page URLs. By default summarizes each page with a fast LLM into a comprehensive markdown digest that covers the WHOLE page and fits the result budget (large raw pages would otherwise be truncated to ~1.5k chars). Set use_llm_processing=false for raw verbatim markdown when you need exact quotes/code/tables — but raw pages over ~100k chars get truncated, so you lose the rest. Also works with PDF URLs (arxiv papers, documents, etc.) — pass the link directly and it converts to text. Pages over 2M chars are refused. If a URL fails or times out, use the browser tool instead.",
     "parameters": {
         "type": "object",
         "properties": {
@@ -1317,6 +1317,11 @@ WEB_EXTRACT_SCHEMA = {
                 "items": {"type": "string"},
                 "description": "List of URLs to extract content from (max 5 URLs per call)",
                 "maxItems": 5
+            },
+            "use_llm_processing": {
+                "type": "boolean",
+                "description": "Default true: LLM-summarize the full page into a digest covering everything, within budget. Set false for raw verbatim markdown when you need exact text — but large raw pages truncate at ~100k chars. Pages under ~5k chars are returned raw regardless.",
+                "default": True
             }
         },
         "required": ["urls"]
@@ -1338,7 +1343,8 @@ registry.register(
     toolset="web",
     schema=WEB_EXTRACT_SCHEMA,
     handler=lambda args, **kw: web_extract_tool(
-        args.get("urls", [])[:5] if isinstance(args.get("urls"), list) else [], "markdown"),
+        args.get("urls", [])[:5] if isinstance(args.get("urls"), list) else [], "markdown",
+        use_llm_processing=args.get("use_llm_processing", True)),
     check_fn=check_web_api_key,
     requires_env=_web_requires_env(),
     is_async=True,
