@@ -400,14 +400,17 @@ def _run_review_in_thread(
             # in the request body — Anthropic's cache key includes it.
             # (The runtime whitelist below still restricts dispatch.)
             review_agent = AIAgent(
-                # wpu interim patch (2026-05-22): route the per-turn skill/
-                # memory review fork off the main model. Upstream wires this
-                # fork to share the parent's prefix cache, but skip_memory=True
-                # drops memory-plugin-contributed tools (holographic's
-                # fact_store/fact_feedback) so tools[] diverges from the parent
-                # → 27B prefix-cache thrash (see ISSUES.md / wpu-curation).
-                # Until that's fixed upstream, send the review to the cheap aux
-                # model. Env-gated — no-op unless HERMES_REVIEW_MODEL is set.
+                # wpu (2026-06-08): the per-turn skill/memory review fork now
+                # runs on the PARENT'S model and shares its warm prefix cache.
+                # The old workaround (2026-05-22) routed it to flash because
+                # skip_memory=True drops the memory-provider tools (holographic
+                # fact_store/fact_feedback) from tools[], diverging the prefix
+                # early and thrashing the 27B KV cache. We now inherit the
+                # parent's exact tools[] below (mirroring _cached_system_prompt),
+                # restoring ~99% prefix sharing — so flash routing is no longer
+                # needed and the context-length stomp it caused on the shared
+                # LCM engine is gone. HERMES_REVIEW_MODEL left as an escape
+                # hatch but should normally be unset.
                 model=os.environ.get("HERMES_REVIEW_MODEL") or agent.model,
                 # Iteration budget for the background reviewer. The reviewer
                 # walks the skill library, opens candidate files, reads
@@ -466,6 +469,22 @@ def _run_review_in_thread(
             # if a future code path bypasses the cache.
             review_agent.session_start = agent.session_start
             review_agent.session_id = agent.session_id
+            # wpu (2026-06-08): inherit the parent's EXACT tools[] so the
+            # outbound request body is byte-identical and reuses the warm prefix
+            # cache. The constructor ran with skip_memory=True, leaving
+            # _memory_manager=None, so the memory-provider tools (fact_store/
+            # fact_feedback) never get appended to this fork's tools[]
+            # (agent_init.py:1207-1220) — an early-prefix divergence that
+            # invalidated the entire downstream KV cache and forced a full
+            # re-prefill (why the fork used to be routed to flash). Mirroring the
+            # _cached_system_prompt inheritance above restores ~99% prefix
+            # sharing so the review runs cheaply on the parent's model. The
+            # thread whitelist below still restricts DISPATCH to memory/skill
+            # tools; advertising the rest (and denying calls) matches the
+            # pre-existing behavior for every other non-whitelisted tool.
+            if agent.tools is not None:
+                review_agent.tools = list(agent.tools)
+                review_agent.valid_tool_names = set(agent.valid_tool_names)
 
             from model_tools import get_tool_definitions
             from hermes_cli.plugins import (
