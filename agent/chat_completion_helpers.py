@@ -136,6 +136,10 @@ def interruptible_api_call(agent, api_kwargs: dict):
     the main retry loop can try again with backoff / credential rotation /
     provider fallback.
     """
+    # Interactive-priority preemption — see interruptible_streaming_api_call.
+    from agent.interactive_preemption import is_low_priority, preempt_low_priority
+    if not is_low_priority(agent):
+        preempt_low_priority()
     result = {"response": None, "error": None}
     request_client_holder = {"client": None, "owner_tid": None}
     request_client_lock = threading.Lock()
@@ -189,6 +193,11 @@ def interruptible_api_call(agent, api_kwargs: dict):
             agent._abort_request_openai_client(request_client, reason=reason)
         else:
             agent._close_request_openai_client(request_client, reason=reason)
+
+    # Publish a stranger-thread-safe canceller for interactive-priority
+    # preemption (agent.interactive_preemption) — abort this call's socket
+    # cross-thread.
+    agent._active_request_canceller = _close_request_client_once
 
     def _call():
         try:
@@ -1568,6 +1577,13 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
     Falls back to _interruptible_api_call on provider errors indicating
     streaming is not supported.
     """
+    # Interactive-priority preemption: an interactive call is starting — kill any
+    # in-flight background-review call so the foreground doesn't queue behind it
+    # on the single std slot. No-op if the caller is itself low-priority or
+    # nothing is registered.
+    from agent.interactive_preemption import is_low_priority, preempt_low_priority
+    if not is_low_priority(agent):
+        preempt_low_priority()
     if agent._interrupt_requested:
         raise InterruptedError("Agent interrupted before streaming API call")
 
@@ -1691,6 +1707,12 @@ def interruptible_streaming_api_call(agent, api_kwargs: dict, *, on_first_delta=
             agent._abort_request_openai_client(request_client, reason=reason)
         else:
             agent._close_request_openai_client(request_client, reason=reason)
+
+    # Publish a stranger-thread-safe canceller so interactive-priority preemption
+    # (agent.interactive_preemption) can abort THIS call's socket cross-thread —
+    # the streaming interrupt poll is per-chunk and won't fire during a chunk-less
+    # cold prefill.
+    agent._active_request_canceller = _close_request_client_once
 
     first_delta_fired = {"done": False}
     deltas_were_sent = {"yes": False}  # Track if any deltas were fired (for fallback)

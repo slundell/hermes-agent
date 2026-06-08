@@ -506,6 +506,13 @@ def _run_review_in_thread(
                     "{tool_name}. Only memory/skill tools are allowed."
                 ),
             )
+            # Interactive-priority preemption: register for the review's whole
+            # run so a live turn can kill it (free the std slot) at any point.
+            from agent.interactive_preemption import (
+                register_low_priority,
+                deregister_low_priority,
+            )
+            register_low_priority(review_agent)
             try:
                 review_agent.run_conversation(
                     user_message=(
@@ -518,6 +525,7 @@ def _run_review_in_thread(
                 )
             finally:
                 clear_thread_tool_whitelist()
+                deregister_low_priority(review_agent)
 
             # Snapshot review actions before teardown. close() is allowed to
             # clean per-session state, but the user-visible self-improvement
