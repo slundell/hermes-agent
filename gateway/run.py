@@ -2473,6 +2473,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # preserve the queue.
         self._queued_events: Dict[str, List[MessageEvent]] = {}
         self._pending_native_image_paths_by_session: Dict[str, List[str]] = {}
+        # Per-gateway-boot tracking of which sessions have had the always_preload
+        # skill bodies injected.  Cleared on every gateway restart so the next
+        # message in each active session re-injects the *current* skill bodies
+        # from disk — addresses the regression where `hermes chat --tui
+        # --continue` resumed sessions never got always_preload because
+        # `_is_new_session` is false for resumes.  Within a single gateway
+        # lifetime, each session_key is injected exactly once, so context
+        # doesn't grow unbounded across turns.  See the always_preload block
+        # below.  (wpu local, 2026-06-02)
+        self._preloaded_sessions: set[str] = set()
         self._busy_ack_ts: Dict[str, float] = {}  # last busy-ack timestamp per session (debounce)
         self._session_run_generation: Dict[str, int] = {}
         # Startup restore gate: while restart-interrupted sessions are being
@@ -8900,8 +8910,26 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
         # any platform-specific binding. Ordering: globals first, then
         # per-channel bindings (so per-channel skills can override/extend
         # by listing the same name; dedup preserves first occurrence).
-        # Only inject on NEW sessions — ongoing conversations already have
-        # the skill content in their conversation history.
+        #
+        # Injection gating (wpu local fix, 2026-06-02):
+        # Originally this only fired on _is_new_session. That meant
+        # `hermes chat --tui --continue` resumed sessions — and any session
+        # active across a gateway restart — never received the preload,
+        # because the resumed session_entry already has a prior message
+        # (created_at < updated_at). Result: operators who updated SKILL.md
+        # files on disk and rolled the pod expecting the new skill content
+        # to land in the next message saw no effect; Aina was running on
+        # whatever (possibly empty) skill body was in her original first
+        # user message.
+        #
+        # New gating: fire once per session per gateway lifetime, tracked
+        # by `self._preloaded_sessions`. The set is cleared on gateway
+        # restart so the next message in each active session re-injects
+        # the *current* skill bodies from disk. Within a single gateway
+        # lifetime each session_key gets injected exactly once, preserving
+        # the original "don't grow context unboundedly across turns"
+        # property. Pod restart = forced skill refresh for every active
+        # session on its next message.
         _auto = getattr(event, "auto_skill", None)
         _global_preload: list[str] = []
         try:
@@ -8922,7 +8950,16 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                 if _s and _s not in _seen_skills:
                     _merged_skills.append(_s)
                     _seen_skills.add(_s)
-        if _is_new_session and _merged_skills:
+        # Fire if either: (a) genuinely new session, OR (b) this session_key
+        # hasn't been preloaded yet during the current gateway lifetime.
+        # (a) | (b) is just `session_key not in self._preloaded_sessions`
+        # — new sessions also aren't in the set on first call. Keeping
+        # _is_new_session check as an explicit hint for the log message.
+        _should_preload = (
+            _merged_skills
+            and session_key not in self._preloaded_sessions
+        )
+        if _should_preload:
             _skill_names = _merged_skills
             try:
                 from agent.skill_commands import _load_skill_payload, _build_skill_message
@@ -8946,9 +8983,11 @@ class GatewayRunner(GatewayAuthorizationMixin, GatewayKanbanWatchersMixin, Gatew
                     # Append the user's original text after all skill payloads
                     _combined_parts.append(event.text)
                     event.text = "\n\n".join(_combined_parts)
+                    self._preloaded_sessions.add(session_key)
                     logger.info(
-                        "[Gateway] Auto-loaded skill(s) %s for session %s",
+                        "[Gateway] Auto-loaded skill(s) %s for session %s (gating: %s)",
                         _loaded_names, session_key,
+                        "new_session" if _is_new_session else "resumed_session_post_boot",
                     )
             except Exception as e:
                 logger.warning("[Gateway] Failed to auto-load skill(s) %s: %s", _skill_names, e)
