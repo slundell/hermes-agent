@@ -583,12 +583,22 @@ def _run_review_in_thread(
                             agent, review_agent, _review_user_msg, _parent_payload,
                         )
                     except Exception as _replay_err:
-                        logger.warning(
-                            "Byte-identical review replay failed (%s); "
-                            "falling back to run_conversation",
-                            _replay_err,
-                        )
-                        _replayed_messages = None
+                        if getattr(review_agent, "_interrupt_requested", False):
+                            # Preempted by an interactive turn — NOT a structural
+                            # failure. End the review here; falling back to
+                            # run_conversation would just re-abort on the same
+                            # interrupt. [] (not None) skips the fallback below.
+                            logger.info(
+                                "Background review preempted during replay — ending (no fallback)."
+                            )
+                            _replayed_messages = []
+                        else:
+                            logger.warning(
+                                "Byte-identical review replay failed (%s); "
+                                "falling back to run_conversation",
+                                _replay_err,
+                            )
+                            _replayed_messages = None
                 if _replayed_messages is None:
                     review_agent.run_conversation(
                         user_message=_review_user_msg,
