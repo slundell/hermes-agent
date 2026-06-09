@@ -4617,6 +4617,13 @@ class AIAgent:
     def _build_api_kwargs(self, api_messages: list) -> dict:
         """Forwarder — see ``agent.chat_completion_helpers.build_api_kwargs``."""
         from agent.chat_completion_helpers import build_api_kwargs
+        # [byte-identical review replay] Snapshot the exact assembled payload the
+        # foreground last sent (= the warm KV in the std slot). The background
+        # review fork replays this verbatim instead of re-deriving the context
+        # through LCM's session-bind (which diverges it -> cold prefill). Shallow
+        # list copy: api_messages is freshly built per call (conversation_loop
+        # ~979) and not mutated after, so this is a cheap, stable reference.
+        self._last_sent_payload = {"messages": list(api_messages), "tools": self.tools}
         return build_api_kwargs(self, api_messages)
 
     def _supports_reasoning_extra_body(self) -> bool:

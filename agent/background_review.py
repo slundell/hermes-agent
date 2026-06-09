@@ -324,6 +324,58 @@ def build_memory_write_metadata(
     return {k: v for k, v in metadata.items() if v not in {None, ""}}
 
 
+REVIEW_REPLAY_MAX_ITERS = 4
+
+
+def run_review_replay(agent, review_agent, review_user_msg, parent_payload):
+    """Byte-identical review replay.
+
+    The intended design clones the full agent so the review shares the foreground's
+    warm prefix cache, but LCM's session-bind (on_session_start) re-derives the
+    bound session's context from its DAG, diverging it from the slot -> cold
+    prefill. This bypasses that re-derivation: replay the foreground's EXACT
+    last-sent payload (``parent_payload['messages']`` — the warm KV in the slot,
+    system at [0] + full injected history) as a frozen prefix and append only the
+    review prompt. No run_conversation, no LCM, so the bytes match the slot.
+
+    Reuses the agent's response builder + sequential tool executor (whitelist-gated
+    and preemption-aware). Bounded to a short review. Returns the review's own new
+    messages (assistant + tool) for the action summary. Raises on any structural
+    surprise so the caller falls back to run_conversation (no regression).
+    """
+    from agent.chat_completion_helpers import interruptible_streaming_api_call
+    from agent.tool_executor import execute_tool_calls_sequential
+
+    base = list(parent_payload["messages"])
+    conv = base + [{"role": "user", "content": review_user_msg}]
+    review_start = len(conv)
+    if parent_payload.get("tools") is not None:
+        review_agent.tools = parent_payload["tools"]   # byte-identical tools[]
+    task_id = getattr(agent, "session_id", "") or ""
+
+    for _i in range(REVIEW_REPLAY_MAX_ITERS):
+        if review_agent._interrupt_requested:
+            break
+        api_kwargs = review_agent._build_api_kwargs(conv)
+        if parent_payload.get("tools") is not None:
+            api_kwargs["tools"] = parent_payload["tools"]
+        response = interruptible_streaming_api_call(review_agent, api_kwargs)
+        if review_agent._interrupt_requested:
+            break
+        choices = getattr(response, "choices", None)
+        if not choices:
+            break
+        assistant_message = choices[0].message
+        assistant_dict = review_agent._build_assistant_message(assistant_message, "stop")
+        conv.append(assistant_dict)
+        if not getattr(assistant_message, "tool_calls", None):
+            break
+        # Whitelist-gated + preemption-aware; appends tool results to conv.
+        execute_tool_calls_sequential(review_agent, assistant_message, conv, task_id, _i + 1)
+
+    return conv[review_start:]
+
+
 def _run_review_in_thread(
     agent: Any,
     messages_snapshot: List[Dict],
@@ -513,16 +565,35 @@ def _run_review_in_thread(
                 deregister_low_priority,
             )
             register_low_priority(review_agent)
+            _review_user_msg = (
+                prompt
+                + "\n\nYou can only call memory and skill "
+                "management tools. Other tools will be denied "
+                "at runtime — do not attempt them."
+            )
+            _replayed_messages = None
+            _parent_payload = getattr(agent, "_last_sent_payload", None)
             try:
-                review_agent.run_conversation(
-                    user_message=(
-                        prompt
-                        + "\n\nYou can only call memory and skill "
-                        "management tools. Other tools will be denied "
-                        "at runtime — do not attempt them."
-                    ),
-                    conversation_history=messages_snapshot,
-                )
+                if _parent_payload and _parent_payload.get("messages"):
+                    # Byte-identical replay: reuse the foreground's warm prefix
+                    # instead of letting LCM re-derive (and cold-prefill) the
+                    # context. Any structural surprise -> fall back below.
+                    try:
+                        _replayed_messages = run_review_replay(
+                            agent, review_agent, _review_user_msg, _parent_payload,
+                        )
+                    except Exception as _replay_err:
+                        logger.warning(
+                            "Byte-identical review replay failed (%s); "
+                            "falling back to run_conversation",
+                            _replay_err,
+                        )
+                        _replayed_messages = None
+                if _replayed_messages is None:
+                    review_agent.run_conversation(
+                        user_message=_review_user_msg,
+                        conversation_history=messages_snapshot,
+                    )
             finally:
                 clear_thread_tool_whitelist()
                 deregister_low_priority(review_agent)
@@ -530,7 +601,13 @@ def _run_review_in_thread(
             # Snapshot review actions before teardown. close() is allowed to
             # clean per-session state, but the user-visible self-improvement
             # summary still needs the completed review agent's tool results.
-            review_messages = list(getattr(review_agent, "_session_messages", []))
+            # The replay path returns its own new messages directly; the
+            # fallback path leaves them on the review agent's session.
+            review_messages = (
+                _replayed_messages
+                if _replayed_messages is not None
+                else list(getattr(review_agent, "_session_messages", []))
+            )
 
             # Tear down memory providers while stdout is still
             # redirected so background thread teardown (Honcho flush,
