@@ -536,18 +536,14 @@ def _run_review_in_thread(
             # in the request body — Anthropic's cache key includes it.
             # (The runtime whitelist below still restricts dispatch.)
             review_agent = AIAgent(
-                # wpu (2026-06-08): the per-turn skill/memory review fork now
-                # runs on the PARENT'S model and shares its warm prefix cache.
-                # The old workaround (2026-05-22) routed it to flash because
-                # skip_memory=True drops the memory-provider tools (holographic
-                # fact_store/fact_feedback) from tools[], diverging the prefix
-                # early and thrashing the 27B KV cache. We now inherit the
-                # parent's exact tools[] below (mirroring _cached_system_prompt),
-                # restoring ~99% prefix sharing — so flash routing is no longer
-                # needed and the context-length stomp it caused on the shared
-                # LCM engine is gone. HERMES_REVIEW_MODEL left as an escape
-                # hatch but should normally be unset.
-                model=os.environ.get("HERMES_REVIEW_MODEL") or agent.model,
+                # wpu (2026-06-08, kept through v2026.6.19 sync): the per-turn
+                # skill/memory review fork runs on the PARENT'S model and shares
+                # its warm prefix cache. (An old 2026-05-22 workaround routed it
+                # to a cheaper model because skip_memory dropped the memory-provider
+                # tools from tools[], thrashing the KV cache — now fixed by
+                # inheriting the parent's exact tools[] below, so the model-routing
+                # escape hatch is dropped: just use the parent model.)
+                model=agent.model,
                 # Iteration budget for the background reviewer. The reviewer
                 # walks the skill library, opens candidate files, reads
                 # context, decides whether to edit — each step is one
