@@ -158,8 +158,11 @@ it as soon as the tool returns.
 Recording a claim is half the job; the other half is **linking** it. urd proves contradictions only between
 claims you have bound — it will not guess that two differently-worded claims are about the same event. As you
 record, ask: does this bear on something already in urd — the **same event**, a **denial/contradiction** of an
-asserted claim, the **same person/place/time**? If so, bind them (`resolve` / `confirm` the connection) and let
-`check` look for a core. Run `check` **after** you've linked, not before — an unlinked store has nothing to prove.
+asserted claim, the **same person/place/time**? If so, **bind them yourself with `link(cid_a, cid_b,
+'same-event'|'same-entity')`** (a denial vs an assertion = an opposite-polarity same-event pair → a
+contradiction), then `confirm(eid)` the returned edge and run `cores()`. (`resolve` only adjudicates
+connections urd already surfaced in your `inbox`; `link` is how you connect claims you noticed yourself.) Bind
+**after** you've recalled the pair — an unlinked store has nothing to prove.
 
 ## Test rivals by disconfirmation, not by re-confirming (closed archive)
 Everything in a closed archive is already readable, so "predict then observe what you read" only re-confirms —
