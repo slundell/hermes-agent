@@ -75,3 +75,13 @@ locators, never full text, so the READ + extraction step is always yours.
 
 Full rubric + tool semantics: `urd://guide/extraction` and `urd://guide/ingest`;
 the always-on one-liner is in `learning-mindset`.
+
+## Test hypotheses by linking + ACH, not by re-confirming what you read
+This is a closed archive — everything is already readable, so "predict then observe what you just read" only
+re-confirms and is worthless. Reason the sound way:
+- For each hypothesis list what it **requires** to be true and what it **forbids**. A required trace that is
+  **absent**, or a forbidden trace that is **present**, is what moves you — seek those, not confirmations.
+- Judge each piece of evidence by **diagnosticity**: does it discriminate between rivals, or fit them all?
+- **Bind the co-referent claims** that bear on a hypothesis (same event / denial-of-asserted / same entity) so
+  urd's checker can prove a contradiction (a `core`). Work `inbox()`; `confirm` real connections; `dismiss`
+  non-contradictions. Then `check`.

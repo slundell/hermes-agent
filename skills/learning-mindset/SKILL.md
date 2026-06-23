@@ -153,3 +153,10 @@ before writing conclusions, so you build on what is already known rather than
 re-deriving it. Absence of a tool is never a reason to skip capture; if `urd`
 is somehow unreachable, hold the cited claim in your working channel and store
 it as soon as the tool returns.
+
+## Connect as you record — urd reasons only over what you link
+Recording a claim is half the job; the other half is **linking** it. urd proves contradictions only between
+claims you have bound — it will not guess that two differently-worded claims are about the same event. As you
+record, ask: does this bear on something already in urd — the **same event**, a **denial/contradiction** of an
+asserted claim, the **same person/place/time**? If so, bind them (`resolve` / `confirm` the connection) and let
+`check` look for a core. Run `check` **after** you've linked, not before — an unlinked store has nothing to prove.
