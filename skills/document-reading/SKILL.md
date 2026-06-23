@@ -17,24 +17,38 @@ compaction never costs you un-saved work. The failure to avoid: read a whole
 document into context → overflow → force-compact → reach `ingest()` with nothing
 (the run that produced 0 claims in ~50 minutes).
 
-## The cadence: bounded chunk → ingest → drop → continue
+## The cadence — a HARD, forcing loop (not a guideline)
 
-- **Read a bounded chunk, not the document.** Take in just enough to understand
-  the claims in context — a section, a few pages — then stop. Never read most or
-  all of a long document before you write, and never read more than a few minutes
-  before an `ingest()`.
-- **Ingest that chunk immediately, then drop it.** Extract the chunk's atomic
-  claims and `ingest([...])` them right away; clear that text from working context
-  before reading the next chunk. Read → ingest → drop → read next.
-- **Keep the unsaved backlog tiny** — a handful of claims in flight, never dozens.
-  If claims are piling up unsaved, stop reading and ingest what you have.
-- **HARD FLUSH on approaching compaction.** If a compaction feels near (LCM /
-  fresh-tail trimming, context filling, a long turn), ingest everything you have
-  extracted *before* it triggers — don't finish the page first. A flushed claim is
-  durable; an un-flushed one is gone.
-- **Saturation = next document.** Watch `already_present_rate` per `ingest()`
-  batch (≈1.0 = already harvested, move on; ≈0.0 = finding new things, keep
-  going); when it saturates the document is harvested — move to the next one.
+This has now failed twice: you read whole documents into context and reached
+`ingest()` with **zero claims**. The fix is a strict read↔ingest interleave you
+do not get to opt out of. The unit is a **window** of text pulled into context.
+
+1. `nextcloud read "<path>"` **once** per document — this writes the *whole*
+   document's text to a file under `/tmp/aina-results/`. It does **not** load it
+   into your context, and it has no offset/length flags.
+2. Pull **ONE window** of that file into context: `sed -n 'START,ENDp' <file>` for
+   ~300–500 lines (~2–3k words). Use `grep -n 'TERM' <file>` to find anchors.
+3. **MANDATORY — your very next urd action MUST be `ingest([...])`** of that
+   window's atomic claims. Not a recall, not another read — `ingest`.
+4. Only then pull the next window (back to step 2).
+
+**You may NOT pull the next window (`sed`) — and may NOT `nextcloud read` another
+document — until the current window's claims are in urd.** Hard constraints, no
+exceptions:
+
+- **Ingest from the FIRST window before reading anything else.** Do not read a
+  second window or a second document to "understand the sequence / context" first.
+  Understanding accumulates in **urd**, not in your context window.
+- **Never hold more than one un-ingested window.** If you have read text you have
+  not yet ingested, ingest it before doing anything else.
+- **Do not cross-reference across documents in your head before recording.**
+  Record each window's claims as they stand; urd links and contradiction-checks
+  them later (`cores()`, `tensions()`). Holding facts in context to "connect them"
+  is exactly what overflows and loses them.
+- **Flush before compaction.** If context is filling or the turn is long, ingest
+  everything pending now — an un-`ingest()`ed claim is lost at compaction.
+- **Saturation = next document.** `already_present_rate` ≈1.0 → that document is
+  harvested, move on; ≈0.0 → keep going.
 
 ## Reading the archive (pre-computed OCR)
 

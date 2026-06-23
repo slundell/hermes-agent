@@ -44,12 +44,16 @@ Forbidden — these mean you failed to persist:
 - ❌ "Ska jag skriva en sammanfattning?"
 - ❌ ending a task with durable facts left only in the chat transcript
 
-## Write as you read (durable-context discipline)
+## Write as you read — HARD interleave rule (not optional)
 
-Bounded chunk → `ingest()` → drop → continue; keep the unsaved backlog to a
-handful, never dozens. An un-`ingest()`ed claim is **lost at the next compaction**;
-an ingested one survives — so if a compaction feels near (long turn, context
-filling), **flush everything pending first**. Full how-to: load **`document-reading`**.
+**After every window of source text you pull into context, your VERY NEXT urd
+action MUST be `ingest()` of that window's claims.** You may not pull a second
+window — no further `sed`/`grep` slice, no new `nextcloud read` — until the
+current window's claims are in urd. Ingest from the FIRST window (~2–3k words)
+before reading anything else; never read several documents to "understand the
+sequence" first, and never cross-reference in your head before recording — urd
+connects claims later, your context just overflows and loses them (the failure
+that produced 0 claims twice). Full procedure: load **`document-reading`**.
 
 ## Extract for recall — record low, extract wide
 
