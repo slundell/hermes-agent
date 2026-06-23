@@ -131,11 +131,11 @@ Ledger of what our fork carries on top of upstream `NousResearch/hermes-agent`, 
 
 ### P18 — `kanban.default_model` config fallback  · `CARRY`
 - **Commit:** `d02c7e000` · **Files:** `hermes_cli/kanban_db.py`
-- **Decision (walk-through): CARRY.** Ours (v2026.6.19 has default_assignee, not default_model). Configurable kanban worker model; flash example moot.
+- **Decision (walk-through): DROP (2026-06-23).** With 2 concurrent slots, kanban workers run on the 2nd slot — no need to route to a different model. Use upstream kanban spawn as-is.
 
 ### P19 — kanban `-m` placement fix (subparser overwrite)  · `CARRY`
 - **Commit:** `5c9eea3e6` · **Files:** `hermes_cli/kanban_db.py`
-- **Decision (walk-through): CARRY (rework).** Verify the `-m`-before-`chat` subparser-overwrite bug still exists in v2026.6.19's worker spawn.
+- **Decision (walk-through): DROP (2026-06-23).** Moot without P18's `-m` model routing (dropped).
 
 ---
 
@@ -198,7 +198,6 @@ Live `wpu-lcm-plugin` untouched (pod-safe); sync done in a worktree, will ff `wp
 P20+P21 skill_manager, P22+P23 gateway always_preload, P12 agent XML-scrub, P15 multimodal_analyze.
 
 **Remaining — conflict resolution (hot files):**
-- `hermes_cli/kanban_db.py` — P18 (`d02c7e000`), P19 (`5c9eea3e6`)
 - `agent/background_review.py` — P3 (`78d53c167`), P4 (`30165d1c6`), P6 (`272cd9b73`) + snapshot (`2817e3a48`); interdependent, resolve in order
 - `agent/conversation_loop.py`, `conversation_compression.py` (P2), `error_classifier.py` (P9), `mcp_tool.py`+`lazy_deps.py` (P13), `conversation_loop.py` (P10) — from snapshot `2817e3a48` (when re-applying the snapshot, DROP its dead files: review_replay_draft.py / holo pruner / oai-wrapper / package-lock.json)
 
