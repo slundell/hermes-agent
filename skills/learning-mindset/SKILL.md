@@ -61,8 +61,16 @@ doubt. The common failure is under-extraction: recording prose narrative instead
 of many atomic claims.
 
 - **Atomic — one assertion per claim.** A sentence stating three things becomes
-  three claims, never one narrative summary. Split relations, quantities, and
-  qualifiers into their own claims.
+  three claims, never one narrative summary. **Never** write
+  `Entity: <paragraph summary>` — split relations, quantities, and qualifiers into
+  their own claims so each can be graded and contradicted on its own.
+- **Claim text = the source's own language, verbatim-close.** For Swedish sources
+  the stored text stays **Swedish** — never translate or summarise into English.
+  The text is preserved primary data; English belongs only in your private notes,
+  never in the stored claim.
+- **Set the type — don't flatten everything to `fact`.** `observation` for
+  testimony / what someone said or saw; polarity `neg` for denials and absences
+  ("X did *not* …"); `relation` / `identity` where they fit.
 - **Capture the classes you skip.** Peripheral details; implicit/entailed facts;
   **negations and absences** ("the record does *not* place X at the scene" is a
   real claim in a closed world); **provenance** ("witness Z said W" — who-said-it

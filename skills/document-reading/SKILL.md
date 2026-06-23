@@ -21,7 +21,8 @@ document into context → overflow → force-compact → reach `ingest()` with n
 
 - **Read a bounded chunk, not the document.** Take in just enough to understand
   the claims in context — a section, a few pages — then stop. Never read most or
-  all of a long document before you write.
+  all of a long document before you write, and never read more than a few minutes
+  before an `ingest()`.
 - **Ingest that chunk immediately, then drop it.** Extract the chunk's atomic
   claims and `ingest([...])` them right away; clear that text from working context
   before reading the next chunk. Read → ingest → drop → read next.
@@ -55,21 +56,39 @@ Reading the corpus through the `nextcloud` tool is the **sanctioned** in-corpus
 path; it stays inside a closed-world / walled-garden run and is **not** "shelling
 out" to the outside. (`nextcloud-research` is authoritative for the tool's flags.)
 
-## What to capture, and how to anchor it
+## What to capture — atomic, verbatim, typed
 
-One assertion per claim; **record low, extract wide** — urd grades, so a weak
-claim is stored at a low grade, not dropped. Capture the classes you skip:
-negations/absences ("the record does *not* place X at the scene"), provenance
-("witness Z said W" — separate from whether W is true), quantities, relations.
-Every claim carries `sources` (PM-number, file, line). Two entities named in the
-same material are not related unless the source says so.
+**Atomic.** One assertion per claim — never a narrative summary, never
+`Entity: <paragraph>`. A sentence asserting three things → three claims, so each
+can be graded and contradicted on its own. (The failed run averaged ~240-char
+multi-part claims; that is the anti-pattern to avoid.)
 
-Anchor **events** with when/where/who so urd can reason over them, not just recall
+**Verbatim-close, in the source's own language.** The stored claim text is
+**preserved primary data** — keep it in the source's words. For Swedish sources
+the text stays **Swedish**; do **not** translate or summarise into English.
+English belongs only in your private notes, never in the stored claim.
+- ✅ `"Daniel sköts i sovrummet den 10 januari 2004."`
+- ❌ `"Daniel was shot in the bedroom on 10 Jan 2004."` (translated)
+- ❌ `"Linde shooting — bedroom, multiple events, see PM"` (summarised)
+
+**Type it — don't flatten everything to `fact`.** Pick the ctype/polarity that
+matches the assertion:
+- `observation` — testimony / what someone said or saw ("Fossmo *uppgav* att …").
+- polarity `neg` — denials and absences ("X *förnekar* …"; "protokollet nämner
+  *inte* …").
+- `relation` / `identity` — a link between entities, or "A is B".
+- `fact` — only for plain source-stated facts that fit none of the above.
+
+**Provenance is its own claim.** "Witness Z said W" is separate from whether W is
+true — record both. **Record low, extract wide:** urd grades, so a weak claim is
+stored low, not dropped. Every claim carries `sources` (PM-number, file, line).
+Two entities named in the same material are not related unless the source says so.
+
+**Anchor events** with when/where/who so urd can reason over them, not just recall
 them — prefer a clock time ("22:00") over a bare date when the source gives one
-(it enables temporal contradiction checks). Check `reasoning_eligible` in the
-response; fix a flat existing claim with `anchor()`, not a re-`remember()`. urd
-holds only claims + locators, never full text, so the READ + extraction step is
-always yours.
+(enables temporal contradiction checks). Check `reasoning_eligible`; fix a flat
+existing claim with `anchor()`, not a re-`remember()`. urd holds only claims +
+locators, never full text, so the READ + extraction step is always yours.
 
-The full extraction rubric and urd tool semantics live in `urd://guide/extraction`
-and `urd://guide/ingest`; the always-on one-liner is in `learning-mindset`.
+Full rubric + tool semantics: `urd://guide/extraction` and `urd://guide/ingest`;
+the always-on one-liner is in `learning-mindset`.
