@@ -160,3 +160,10 @@ claims you have bound — it will not guess that two differently-worded claims a
 record, ask: does this bear on something already in urd — the **same event**, a **denial/contradiction** of an
 asserted claim, the **same person/place/time**? If so, bind them (`resolve` / `confirm` the connection) and let
 `check` look for a core. Run `check` **after** you've linked, not before — an unlinked store has nothing to prove.
+
+## Test rivals by disconfirmation, not by re-confirming (closed archive)
+Everything in a closed archive is already readable, so "predict then observe what you read" only re-confirms —
+worthless. For each hypothesis, name what it **requires** and what it **forbids**; a required trace that is
+**absent**, or a forbidden trace that is **present**, is what moves you. Rate evidence by whether it
+**discriminates** rivals; seek disconfirmation. Bind the co-referent claims a hypothesis turns on so `check`
+can prove a contradiction (a `core`).
