@@ -44,16 +44,17 @@ Forbidden — these mean you failed to persist:
 - ❌ "Ska jag skriva en sammanfattning?"
 - ❌ ending a task with durable facts left only in the chat transcript
 
-## Write as you read — HARD interleave rule (not optional)
+## Write as you read — urd is your working memory
 
-**After every window of source text you pull into context, your VERY NEXT urd
-action MUST be `ingest()` of that window's claims.** You may not pull a second
-window — no further `sed`/`grep` slice, no new `nextcloud read` — until the
-current window's claims are in urd. Ingest from the FIRST window (~2–3k words)
-before reading anything else; never read several documents to "understand the
-sequence" first, and never cross-reference in your head before recording — urd
-connects claims later, your context just overflows and loses them (the failure
-that produced 0 claims twice). Full procedure: load **`document-reading`**.
+urd is your durable working memory; your context window is volatile and will
+compact and vanish. Recording a claim to urd IS the thinking step, not a
+save-for-later — as you read and understand each fact, record it then. A fact you
+understand but leave only in your head is lost at the next compaction. Read as
+much as you genuinely need to understand a passage — no limit on that — but don't
+read and hold the whole case before recording; build understanding incrementally
+in urd and revisit it with `recall`/`coverage`/`cores`. If your context starts
+filling, that means you're holding things that belong in urd — record them now.
+Full procedure: load **`document-reading`**.
 
 ## Extract for recall — record low, extract wide
 
@@ -135,13 +136,14 @@ a *correct* claim is always `anchor`, never `replace`.
 
 ## Where the mechanics live
 
-- **Ingesting a long document** (read the archive → read→`ingest()`→drop in
-  bounded chunks → all three sinks) → load **`document-reading`** for the how-to,
-  **`nextcloud-research`** for the archive tool; urd tool semantics live in
-  `urd://guide/ingest`. Always-on reminders: case-source docs are in the Nextcloud
-  archive — use **`nextcloud read "<path>"`** via `terminal` (it returns
-  pre-computed OCR), *not* `document_read` (which can't resolve `/nextcloud/…`);
-  and urd holds only claims + locators, so the READ + extraction step is yours.
+- **Reading a primary source into urd** (read forward in digestible reads →
+  record each fact as you understand it → all three sinks) → load
+  **`document-reading`** for the how-to; urd tool semantics live in
+  `urd://guide/ingest`. Always-on reminder: the closed-world case corpus is
+  staged locally at **`/data/knutby-corpus/`** — read it with the **`read_file`**
+  tool (line-numbered, paginated; follow the returned `hint` to page forward),
+  not nextcloud or `document_read`; and urd holds only claims + locators, so the
+  READ + extraction step is always yours.
 - **Wiki source-pages, index, log, schema** → **`llm-wiki`**.
 - **Vault writes** (paths, frontmatter, wikilinks, obsidian-cli) → **`obsidian`**.
 - **Growing a multi-session research note** → **`iterative-research-notes`**.

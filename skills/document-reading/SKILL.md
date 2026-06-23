@@ -1,74 +1,43 @@
 ---
 name: document-reading
-description: How-to for ingesting a primary source into urd without losing claims to context compaction — the bounded-chunk read→ingest→drop cadence, the nextcloud archive reader (pre-computed OCR), the hard-flush rule, and what to capture. Load when reading/ingesting any long document.
+description: How-to for reading a primary source into urd as durable, sourced claims without losing them to context compaction — the pre-staged local corpus read path and the externalize-as-you-understand cadence. Load when reading or ingesting any long document.
 when_to_use: |
-  Pull this when you are about to read and ingest a primary source (an archive
-  PDF, a long report, a transcript) into urd. It is the operational how-to behind
-  the always-on "write as you read" principle in learning-mindset: read in
-  bounded chunks, ingest each chunk immediately, keep the unsaved backlog tiny,
-  and hard-flush before a compaction. urd tool semantics live in urd://guide.
+  Pull this when you are about to read and ingest a primary source (a case
+  file, a long report, a transcript) into urd. It is the operational how-to
+  behind the always-on "urd is your working memory" principle in
+  learning-mindset: read the source directly, in digestible parts, and record
+  each fact the moment you understand it, so a context compaction never costs
+  you un-saved work. urd tool semantics live in urd://guide.
 ---
 
-# Document reading — ingest a primary source without losing claims
+# Document reading — read a primary source into urd as you understand it
 
 urd is durable; your working context is **not**. The whole job is to move atomic,
-sourced claims from the document into urd *faster than your context fills*, so a
+sourced claims from the document into urd *as you understand them*, so a
 compaction never costs you un-saved work. The failure to avoid: read a whole
-document into context → overflow → force-compact → reach `ingest()` with nothing
-(the run that produced 0 claims in ~50 minutes).
+document into context → it overflows → force-compact → you reach `ingest()` with
+nothing (the run that produced 0 claims in ~50 minutes).
 
-## The cadence — a HARD, forcing loop (not a guideline)
+## The cadence — externalize as you understand
 
-This has now failed twice: you read whole documents into context and reached
-`ingest()` with **zero claims**. The fix is a strict read↔ingest interleave you
-do not get to opt out of. The unit is a **window** of text pulled into context.
+urd is durable; your working context is not. You think IN urd — recording a claim
+is the thinking step, not a save-afterward. Read as much as you need to understand
+a passage (no limit), but record each fact as you understand it rather than piling
+up understood-but-unrecorded facts to dump later; don't read the whole case before
+recording — understanding accumulates in urd, which you revisit with
+`recall`/`coverage`/`cores`. Watch `already_present_rate` per ingest: ~1.0 →
+document harvested, move on; ~0.0 → keep going. If context fills, ingest what
+you're holding now.
 
-1. `nextcloud read "<path>"` **once** per document — this writes the *whole*
-   document's text to a file under `/tmp/aina-results/`. It does **not** load it
-   into your context, and it has no offset/length flags.
-2. Pull **ONE window** of that file into context: `sed -n 'START,ENDp' <file>` for
-   ~300–500 lines (~2–3k words). Use `grep -n 'TERM' <file>` to find anchors.
-3. **MANDATORY — your very next urd action MUST be `ingest([...])`** of that
-   window's atomic claims. Not a recall, not another read — `ingest`.
-4. Only then pull the next window (back to step 2).
+## Reading the corpus (pre-staged, local)
 
-**You may NOT pull the next window (`sed`) — and may NOT `nextcloud read` another
-document — until the current window's claims are in urd.** Hard constraints, no
-exceptions:
-
-- **Ingest from the FIRST window before reading anything else.** Do not read a
-  second window or a second document to "understand the sequence / context" first.
-  Understanding accumulates in **urd**, not in your context window.
-- **Never hold more than one un-ingested window.** If you have read text you have
-  not yet ingested, ingest it before doing anything else.
-- **Do not cross-reference across documents in your head before recording.**
-  Record each window's claims as they stand; urd links and contradiction-checks
-  them later (`cores()`, `tensions()`). Holding facts in context to "connect them"
-  is exactly what overflows and loses them.
-- **Flush before compaction.** If context is filling or the turn is long, ingest
-  everything pending now — an un-`ingest()`ed claim is lost at compaction.
-- **Saturation = next document.** `already_present_rate` ≈1.0 → that document is
-  harvested, move on; ≈0.0 → keep going.
-
-## Reading the archive (pre-computed OCR)
-
-Case-source documents live in the team Nextcloud archive — not on the local
-filesystem (`document_read("/nextcloud/…")` returns *file not found*). Use the
-`nextcloud` tool via `terminal` (never `execute_code` — no creds in that sandbox):
-
-- `nextcloud ls "<folder>"` — list the corpus.
-- `nextcloud read "<archive path>"` — extract text. Returns the archive's
-  **pre-computed OCR** from the search index (~2s; it only re-runs OCR as a
-  fallback for the rare unindexed file) and saves it under `/tmp/aina-results/`.
-- The extract is large, so **slice it** — never load the whole file into context:
-  `grep -n 'TERM' <file>` to find section anchors, `sed -n 'START,ENDp' <file>`
-  to pull one chunk at a time. This *is* the bounded-chunk read above.
-- If `read` returns a near-empty file, the OCR is corrupt for that doc — move on,
-  don't retry the same path.
-
-Reading the corpus through the `nextcloud` tool is the **sanctioned** in-corpus
-path; it stays inside a closed-world / walled-garden run and is **not** "shelling
-out" to the outside. (`nextcloud-research` is authoritative for the tool's flags.)
+The Knutby closed-world corpus is plain text on the local filesystem at
+`/data/knutby-corpus/` — one `.txt` per source document. Read it directly with
+`read_file`; NO nextcloud, NO OCR, NO fetching. The `FU_Del` files are large —
+read a long document in parts (`read_file` with offset/limit if available;
+otherwise read a leading span, record, continue) so one read doesn't flood your
+context. This is only to keep a single read digestible — there is NO cap on how
+much of a document you may read in total.
 
 ## What to capture — atomic, verbatim, typed
 
