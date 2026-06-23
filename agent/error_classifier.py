@@ -53,6 +53,7 @@ class FailoverReason(enum.Enum):
     format_error = "format_error"        # 400 bad request — abort or strip + retry
     invalid_encrypted_content = "invalid_encrypted_content"  # Responses replay blob rejected — strip replay state and retry
     multimodal_tool_content_unsupported = "multimodal_tool_content_unsupported"  # Provider rejected list-type content in tool messages (e.g. Xiaomi MiMo) — downgrade to text and retry
+    assistant_prefill_unsupported = "assistant_prefill_unsupported"  # Thinking-template provider rejects trailing-assistant prefill (llama.cpp Qwen enable_thinking) — strip and retry
 
     # Provider-specific
     thinking_signature = "thinking_signature"  # Anthropic thinking block sig invalid
@@ -230,6 +231,13 @@ _CONTEXT_OVERFLOW_PATTERNS = [
     # llama.cpp / llama-server patterns
     "slot context",              # "slot context: N tokens, prompt N tokens"
     "n_ctx_slot",
+    # llama.cpp with --no-context-shift: slot is full, generation refused.
+    # Deterministic ceiling error — same recovery as an oversized prompt.
+    "context shift is disabled",
+    # llama.cpp/ik_llama.cpp pre-admission rejection, third phrasing variant:
+    # "Input prompt is too big compared to KV size. Please try increasing
+    # KV size." Same deterministic ceiling class.
+    "too big compared to kv size",
     # Chinese error messages (some providers return these)
     "超过最大长度",
     "上下文长度",
@@ -238,6 +246,14 @@ _CONTEXT_OVERFLOW_PATTERNS = [
     "max input token",
     "input token",
     "exceeds the maximum number of input tokens",
+]
+
+# Thinking-template assistant-prefill rejection (llama.cpp Qwen3.x with
+# --chat-template-kwargs {"enable_thinking":true} refuses to continue a
+# partial assistant message). Deterministic; recovery = strip the trailing
+# assistant message and retry once (see conversation_loop).
+_ASSISTANT_PREFILL_PATTERNS = [
+    "prefill is incompatible with enable_thinking",
 ]
 
 # Model not found patterns
@@ -844,6 +860,29 @@ def _classify_by_status(
         )
 
     if status_code in {500, 502}:
+        # llama.cpp's OAI server reports context overflow as HTTP 500 with
+        # type=server_error ("the request exceeds the available context
+        # size, try increasing it"). It's deterministic — retrying the
+        # identical payload burns max_retries and fails the turn — so route
+        # it to the compress-and-restart recovery like the 400/413 paths.
+        if any(p in error_msg for p in _CONTEXT_OVERFLOW_PATTERNS):
+            return result_fn(
+                FailoverReason.context_overflow,
+                retryable=True,
+                should_compress=True,
+            )
+
+        # llama.cpp thinking templates (Qwen3.x with enable_thinking) cannot
+        # continue a partial assistant message: HTTP 500 "Assistant response
+        # prefill is incompatible with enable_thinking." Deterministic — the
+        # recovery (conversation_loop) strips the trailing assistant message
+        # and retries once.
+        if any(p in error_msg for p in _ASSISTANT_PREFILL_PATTERNS):
+            return result_fn(
+                FailoverReason.assistant_prefill_unsupported,
+                retryable=True,
+            )
+
         # Some OpenAI-compatible gateways return request-validation errors
         # with a 5xx status (codex.nekos.me returns 502 for unknown/
         # unsupported parameters). These are deterministic — every retry
@@ -1104,6 +1143,15 @@ def _classify_by_message(
     result_fn,
 ) -> Optional[ClassifiedError]:
     """Classify based on error message patterns when no status code is available."""
+
+    # Thinking-template assistant-prefill rejection (mid-stream surface:
+    # plain APIError with no status code). Deterministic — see the 5xx
+    # branch in _classify_by_status for the status-coded variant.
+    if any(p in error_msg for p in _ASSISTANT_PREFILL_PATTERNS):
+        return result_fn(
+            FailoverReason.assistant_prefill_unsupported,
+            retryable=True,
+        )
 
     # Payload-too-large patterns (from message text when no status_code)
     if any(p in error_msg for p in _PAYLOAD_TOO_LARGE_PATTERNS):

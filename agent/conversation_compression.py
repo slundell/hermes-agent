@@ -464,6 +464,24 @@ def compress_context(
         _release_lock()  # compression aborted — no rotation will happen
         return messages, _existing_sp
 
+    # LCM leaf no-op: compress() succeeded but returned the input unchanged
+    # because the raw backlog outside the fresh tail is below the leaf-chunk
+    # threshold (the engine logs "compression no-op"). This is NOT a logical
+    # session boundary — nothing was compacted. Rotating anyway (new session_id
+    # + rebuilt system prompt + on_session_start) makes the context engine
+    # RE-DERIVE the prefix, which is not byte-identical past the system+tools
+    # front, so the warm std/MTP KV is evicted and the slot cold-prefills the
+    # whole compacted body (~70k) every turn above threshold. Skip rotation on
+    # the no-op (mirrors the abort path above) so the prefix stays byte-stable
+    # and the cache stays warm. Callers already treat len(returned) ==
+    # len(input) as the no-op (see this function's docstring).
+    if len(compressed) == len(messages):
+        _existing_sp = getattr(agent, "_cached_system_prompt", None)
+        if not _existing_sp:
+            _existing_sp = agent._build_system_prompt(system_message)
+        _release_lock()  # nothing compacted — no rotation
+        return messages, _existing_sp
+
     summary_error = getattr(agent.context_compressor, "_last_summary_error", None)
     if summary_error:
         if getattr(agent, "_last_compression_summary_warning", None) != summary_error:

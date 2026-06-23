@@ -85,7 +85,16 @@ _SKILL_REVIEW_PROMPT = (
     "condensed knowledge banks: quoted research, API docs, external "
     "authoritative excerpts, or domain notes you found while working "
     "on the problem. Write it concise and for the value of the task, "
-    "not as a full mirror of upstream docs.\n"
+    "not as a full mirror of upstream docs. HARD RULE — references "
+    "hold GENERALIZABLE technique only. Never write investigation or "
+    "case material into a skill: subject names, places, per-subject "
+    "search results, or findings about a specific person/event are "
+    "case material, not methodology. Such a reference file gets "
+    "loaded into UNRELATED future sessions and primes the model with "
+    "the wrong subject (cross-session contamination, 2026-06-13). "
+    "Case findings go to the Obsidian vault or fact_store; if an "
+    "example is needed to teach a technique, parameterize it "
+    "(`<Efternamn>`, `<vittne>`) — do not name a real subject.\n"
     "     • `templates/<name>.<ext>` — starter files meant to be "
     "copied and modified (boilerplate configs, scaffolding, a "
     "known-good example the agent can `reproduce with modifications`).\n"
@@ -180,7 +189,15 @@ _COMBINED_REVIEW_PROMPT = (
     "skill_manage action=write_file. Three kinds: "
     "`references/<topic>.md` for session-specific detail OR condensed "
     "knowledge banks (quoted research, API docs excerpts, domain "
-    "notes) written concise and task-focused; `templates/<name>.<ext>` "
+    "notes) written concise and task-focused — but GENERALIZABLE "
+    "technique ONLY: never write investigation or case material "
+    "(subject names, places, per-subject search results, findings "
+    "about a specific person/event) into a skill. It loads into "
+    "unrelated future sessions and primes the wrong subject "
+    "(cross-session contamination, 2026-06-13). Case findings go to "
+    "the vault or fact_store; parameterize any teaching example "
+    "(`<Efternamn>`, `<vittne>`) rather than naming a real subject; "
+    "`templates/<name>.<ext>` "
     "for starter files meant to be copied and modified; "
     "`scripts/<name>.<ext>` for statically re-runnable actions "
     "(verification, fixture generators, probes). Add a one-line "
@@ -325,6 +342,104 @@ def build_memory_write_metadata(
 
 
 REVIEW_REPLAY_MAX_ITERS = 4
+
+# Minimum free tokens (window − foreground payload − review prompt) required
+# to attempt the byte-identical replay: room for the review's assistant
+# output plus a few whitelisted tool iterations. Below this, the replay
+# request would be rejected by the server as a context overflow (llama.cpp
+# reports it as HTTP 500) — seen live 2026-06-11 20:23 with the foreground
+# at 123.7k real tokens against a 131,072-token slot.
+REVIEW_REPLAY_MIN_HEADROOM = 8192
+
+
+def replay_headroom_ok(agent, parent_payload, review_user_msg) -> bool:
+    """True when the foreground payload + review prompt + response margin
+    fit the model's context window.
+
+    The payload size comes from the foreground's last server-reported
+    prompt usage (``compressor.last_prompt_tokens`` — exact, no estimator
+    drift on Swedish/OCR-heavy text), falling back to a rough estimate
+    when no real usage exists yet (0, or the -1 post-compression sentinel).
+    Unknown window (no compressor / context_length 0) never gates.
+    """
+    compressor = getattr(agent, "context_compressor", None)
+    ctx = getattr(compressor, "context_length", 0) or 0
+    if ctx <= 0:
+        return True
+    payload_tokens = getattr(compressor, "last_prompt_tokens", 0) or 0
+    if payload_tokens <= 0:
+        from agent.model_metadata import estimate_messages_tokens_rough
+        payload_tokens = estimate_messages_tokens_rough(
+            parent_payload.get("messages") or []
+        )
+    from agent.model_metadata import estimate_tokens_rough
+    needed = (
+        payload_tokens
+        + estimate_tokens_rough(review_user_msg)
+        + REVIEW_REPLAY_MIN_HEADROOM
+    )
+    return needed <= ctx
+
+
+def _attempt_review_replay(agent, review_agent, review_user_msg, parent_payload):
+    """Run the byte-identical replay with headroom + overflow guards.
+
+    Returns the review's new messages on success, ``[]`` when the review
+    should be SKIPPED with no fallback (no headroom, context overflow on
+    the replay request, or interactive preemption), or ``None`` when the
+    caller should fall back to ``run_conversation`` (no payload captured,
+    or a structural replay failure).
+
+    Skipping instead of falling back on overflow is deliberate: the
+    fallback re-assembles the context through LCM, which diverges from the
+    foreground's warm prefix and cold-prefills the slot — on the
+    single-conversation std slot that starves live turns (743s incident
+    2026-06-11). A skipped review costs nothing; the next nudge retries
+    on a (post-compaction) smaller context.
+    """
+    if not (parent_payload and parent_payload.get("messages")):
+        return None
+    if not replay_headroom_ok(agent, parent_payload, review_user_msg):
+        logger.info(
+            "Background review skipped: foreground payload too close to the "
+            "context ceiling for byte-identical replay — no fallback "
+            "(re-assembly would cold-prefill the slot)."
+        )
+        return []
+    try:
+        return run_review_replay(agent, review_agent, review_user_msg, parent_payload)
+    except Exception as replay_err:
+        if getattr(review_agent, "_interrupt_requested", False):
+            # Preempted by an interactive turn — NOT a structural failure.
+            # Falling back to run_conversation would just re-abort on the
+            # same interrupt.
+            logger.info(
+                "Background review preempted during replay — ending (no fallback)."
+            )
+            return []
+        from agent.error_classifier import FailoverReason, classify_api_error
+        compressor = getattr(agent, "context_compressor", None)
+        classified = classify_api_error(
+            replay_err,
+            provider=getattr(agent, "provider", "") or "",
+            model=getattr(agent, "model", "") or "",
+            approx_tokens=max(0, getattr(compressor, "last_prompt_tokens", 0) or 0),
+            context_length=getattr(compressor, "context_length", 0) or 200000,
+        )
+        if classified.reason == FailoverReason.context_overflow:
+            logger.warning(
+                "Byte-identical review replay hit context overflow (%s) — "
+                "skipping review (no fallback; re-assembly would "
+                "cold-prefill the slot).",
+                replay_err,
+            )
+            return []
+        logger.warning(
+            "Byte-identical review replay failed (%s); "
+            "falling back to run_conversation",
+            replay_err,
+        )
+        return None
 
 
 def run_review_replay(agent, review_agent, review_user_msg, parent_payload):
@@ -571,34 +686,15 @@ def _run_review_in_thread(
                 "management tools. Other tools will be denied "
                 "at runtime — do not attempt them."
             )
-            _replayed_messages = None
             _parent_payload = getattr(agent, "_last_sent_payload", None)
             try:
-                if _parent_payload and _parent_payload.get("messages"):
-                    # Byte-identical replay: reuse the foreground's warm prefix
-                    # instead of letting LCM re-derive (and cold-prefill) the
-                    # context. Any structural surprise -> fall back below.
-                    try:
-                        _replayed_messages = run_review_replay(
-                            agent, review_agent, _review_user_msg, _parent_payload,
-                        )
-                    except Exception as _replay_err:
-                        if getattr(review_agent, "_interrupt_requested", False):
-                            # Preempted by an interactive turn — NOT a structural
-                            # failure. End the review here; falling back to
-                            # run_conversation would just re-abort on the same
-                            # interrupt. [] (not None) skips the fallback below.
-                            logger.info(
-                                "Background review preempted during replay — ending (no fallback)."
-                            )
-                            _replayed_messages = []
-                        else:
-                            logger.warning(
-                                "Byte-identical review replay failed (%s); "
-                                "falling back to run_conversation",
-                                _replay_err,
-                            )
-                            _replayed_messages = None
+                # Byte-identical replay: reuse the foreground's warm prefix
+                # instead of letting LCM re-derive (and cold-prefill) the
+                # context. [] = skip review entirely (no headroom / overflow /
+                # preemption); None = fall back to run_conversation below.
+                _replayed_messages = _attempt_review_replay(
+                    agent, review_agent, _review_user_msg, _parent_payload,
+                )
                 if _replayed_messages is None:
                     review_agent.run_conversation(
                         user_message=_review_user_msg,

@@ -4441,6 +4441,53 @@ class AIAgent:
         from agent.conversation_compression import try_shrink_image_parts_in_messages
         return try_shrink_image_parts_in_messages(api_messages)
 
+    def _try_strip_trailing_assistant_prefill(self, api_messages: list) -> bool:
+        """Drop a trailing assistant message so the retry is not a prefill.
+
+        Recovery for thinking-template providers that cannot continue a
+        partial assistant message: llama.cpp serving Qwen3.x with
+        ``--chat-template-kwargs {"enable_thinking":true}`` returns a
+        deterministic HTTP 500 "Assistant response prefill is incompatible
+        with enable_thinking." A payload can end on an assistant message
+        after a mid-turn forced-overflow compaction rebuilds the history
+        around an in-flight response (observed 2026-06-12: 3 verbatim
+        retries → dead turn after a 52-minute compaction).
+
+        Only a trailing assistant message WITHOUT tool_calls is stripped —
+        popping a tool-call message would orphan its tool results. The
+        partial content is dropped; the model regenerates it from the
+        compacted context. Records (provider, model) in
+        ``self._assistant_prefill_unsupported_models`` for the session.
+
+        Returns True when the trailing message was stripped — the caller
+        (the recovery branch in ``agent.conversation_loop``) uses this to
+        decide whether to retry or surface the original error.
+        """
+        if not isinstance(api_messages, list) or not api_messages:
+            return False
+        last = api_messages[-1]
+        if not isinstance(last, dict) or last.get("role") != "assistant":
+            return False
+        if last.get("tool_calls"):
+            return False
+
+        key = (
+            (getattr(self, "provider", "") or "").strip().lower(),
+            (getattr(self, "model", "") or "").strip(),
+        )
+        if not hasattr(self, "_assistant_prefill_unsupported_models"):
+            self._assistant_prefill_unsupported_models = set()
+        if key[1]:
+            self._assistant_prefill_unsupported_models.add(key)
+
+        dropped = api_messages.pop()
+        logger.info(
+            "assistant-prefill recovery: dropped trailing assistant message "
+            "(%d chars) so the retry is a fresh generation, not a prefill.",
+            len(str(dropped.get("content") or "")),
+        )
+        return True
+
     def _try_strip_image_parts_from_tool_messages(self, api_messages: list) -> bool:
         """Downgrade list-type tool messages to text summaries in-place.
 
