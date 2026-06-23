@@ -51,7 +51,7 @@ Ledger of what our fork carries on top of upstream `NousResearch/hermes-agent`, 
 ### P4 — byte-identical replay (reuse foreground warm prefix)  · `CARRY`
 - **Commit:** `30165d1c6` · **Files:** `agent/background_review.py`, `run_agent.py`
 - **What it does:** replays the foreground's warm prefix verbatim rather than re-deriving via LCM (avoids cold reprefill on review).
-- **Decision (walk-through): CARRY (rework).** P3's deeper half (full-payload byte-identity); same 2-slot caveat. Verify the helper APIs on v2026.6.19. Long-term: belongs in the LCM plugin (preserve byte-identity in on_session_start).
+- **Decision (FINAL 2026-06-23): DROP (replay machinery).** `_last_sent_payload` is GONE from v2026.6.19 (was our capture-side addition); upstream caught up on prefix-parity (cached-prompt + session-inherit + compression_enabled=False, merged via P3); P4 was entangled with shelved P5; 2-slot host-RAM bridge backstops. Drops P6 (replay-interrupt) + P8 replay-headroom-guard too. MEASURE bg-review prefix-hit post-sync; re-add a slim replay only if it cold-prefills.
 
 ### P5 — interactive-priority preemption  · `CARRY`
 - **Commit:** `e5675b5f5` · **Files:** `agent/background_review.py`, `agent/chat_completion_helpers.py`, `agent/interactive_preemption.py` (new)
@@ -60,8 +60,8 @@ Ledger of what our fork carries on top of upstream `NousResearch/hermes-agent`, 
 
 ### P6 — don't mislabel preemption as failure  · `CARRY`
 - **Commit:** `272cd9b73` · **Files:** `agent/background_review.py`
-- **What it does:** a preempted/interrupted bg-review isn't an error → don't log failure or trigger fallback on interrupt.
-- **Decision (walk-through): CARRY (rework).** Refines P4's replay path; checks `_interrupt_requested` (any interrupt source — user/gateway/watchdog), NOT P5-specific. Valid with P5 shelved.
+- **What it does:** a preempted/interrupted bg-review isn't an error → don't log failure on interrupt.
+- **Decision (FINAL 2026-06-23): DROP.** Only meaningful with P4's replay path, which is dropped.
 
 ### P7 — bg-review iteration budget 16 → 32 (env-tunable)  · `CARRY`
 - **Commit:** `e7effb763` · **Files:** `agent/background_review.py`
@@ -69,8 +69,8 @@ Ledger of what our fork carries on top of upstream `NousResearch/hermes-agent`, 
 
 ### P8 — bg-review/replay snapshot deltas + draft + guards  · `CARRY`
 - **Commit:** `2817e3a48` · **Files:** `agent/background_review.py` (+152), `agent/review_replay_draft.py` (new), `tests/run_agent/test_background_review_replay_guard.py`, `test_review_prompt_case_material_guard.py`
-- **What it does:** latest bg-review/replay working-tree changes + the replay-draft module + guard tests (replay correctness, case-material leak guard).
-- **Decision:**
+- **What it does:** latest bg-review/replay deltas + guard tests.
+- **Decision (FINAL 2026-06-23): SPLIT — CARRY the case-material-fencing (review-prompt guard + its test, the contamination fix, independent of replay); DROP the replay-headroom guard + its test (replay dropped).**
 
 ---
 
@@ -202,3 +202,17 @@ P20+P21 skill_manager, P22+P23 gateway always_preload, P12 agent XML-scrub, P15 
 - `agent/conversation_loop.py`, `conversation_compression.py` (P2), `error_classifier.py` (P9), `mcp_tool.py`+`lazy_deps.py` (P13), `conversation_loop.py` (P10) — from snapshot `2817e3a48` (when re-applying the snapshot, DROP its dead files: review_replay_draft.py / holo pruner / oai-wrapper / package-lock.json)
 
 **Then:** (1) **P1 empirical** — deploy v2026.6.19 + hermes-lcm plugin + `engine: lcm`, confirm LCM loads with ZERO agent_init edits; (2) drop the moot flash-routing line in P7; (3) update the bg-review headroom guard 131072→262144; (4) **test** (LCM, bg-review, MCP); (5) ff `wpu-lcm-plugin` → `sync/v2026.6.19` and rollout.
+
+---
+
+## Sync code-merge COMPLETE (2026-06-23) — `sync/v2026.6.19` (12 commits)
+
+All CARRY patches re-fitted onto v2026.6.19; clean tree, no markers, compiles, **merged-patch tests PASS** (166 error_classifier + 15 compression/prefill/fencing).
+
+**Applied:** P2, P3 (tools[] parity, merged with upstream's new compression-off+cached-prompt), P7 (budget; flash-routing trimmed), P8-fencing, P9, P10 (+ run_agent `_try_strip` method; `assistant_prefill_retry_attempted` kept local since upstream moved others to TurnRetryState), P12, P13, P14, P15, P20, P21, P22, P23, P24.
+**Dropped:** P1 (LCM upstream-wired → config-only), P4/P6 (replay — `_last_sent_payload` gone upstream + P5 entanglement), P5 (preempt — blocks 2-slot concurrency), P11/P16 (upstreamed), P17/P25 (dead), P18/P19 (kanban — 2-slot), D1–D4.
+
+**REMAINING (deploy/promote phase, not code):**
+1. **P1 empirical** — deploy sync + hermes-lcm plugin + `engine: lcm`; confirm LCM loads with ZERO agent_init edits (only open P1 question).
+2. **Full test deploy** — real Aina turn on the sync (LCM compaction, bg-review prefix-hit in 2-slot, MCP, prefill recovery).
+3. **Promote** — `git -C /wpu/src/hermes merge --ff-only sync/v2026.6.19` (ff `wpu-lcm-plugin`) + gateway restart/rollout. Keep the worktree until prod-verified.
