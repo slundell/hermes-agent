@@ -187,6 +187,20 @@ _MCP_MESSAGE_HANDLER_SUPPORTED = False
 # Streamable HTTP was introduced by 2025-03-26, so this remains valid for the
 # HTTP transport path even on older-but-supported SDK versions.
 LATEST_PROTOCOL_VERSION = "2025-03-26"
+# Lazy-install the MCP client SDK into the active venv before the import guard
+# below, but ONLY when the operator has actually configured `mcp_servers` — a
+# deployment with no MCP servers shouldn't pull the SDK. This is what keeps a
+# PVC-backed gateway venv (created without the [mcp] extra) from silently
+# no-op'ing every configured MCP server. Best-effort: if lazy installs are
+# disabled or PyPI is unreachable, we fall through to the graceful-degradation
+# ImportError path (_MCP_AVAILABLE stays False).
+try:
+    from hermes_cli.config import load_config as _load_cfg_for_mcp
+    if (_load_cfg_for_mcp() or {}).get("mcp_servers"):
+        from tools.lazy_deps import ensure as _ensure_mcp_dep
+        _ensure_mcp_dep("tool.mcp", prompt=False)
+except Exception:
+    pass
 try:
     from mcp import ClientSession, StdioServerParameters
     from mcp.client.stdio import stdio_client
@@ -1584,7 +1598,7 @@ class MCPServerTask:
             # notifications. Tools absent from the fresh list are no longer
             # callable, so remove only those stale registry entries first.
             stale_tool_names = old_tool_names - {
-                f"mcp_{sanitize_mcp_name_component(self.name)}_"
+                f"{_tool_name_prefix(self.name)}{sanitize_mcp_name_component(self.name)}_"
                 f"{sanitize_mcp_name_component(tool.name)}"
                 for tool in new_mcp_tools
             }
@@ -3645,6 +3659,34 @@ def sanitize_mcp_name_component(value: str) -> str:
     return re.sub(r"[^A-Za-z0-9_]", "_", str(value or ""))
 
 
+# Per-server override for the leading tool-name prefix. Default "mcp_" yields the
+# historical agent-facing names "mcp_<server>_<tool>". A server may set
+# ``mcp_servers.<name>.tool_prefix`` to replace that leading literal — e.g. ""
+# gives "<server>_<tool>" (drops the "mcp_" noise but keeps the server namespace,
+# so e.g. urd verbs can't collide with kb/mop tools). Populated at registration
+# (_register_server_tools) and read by the name builders below; falls back to
+# "mcp_" for any server not yet registered. Keyed by logical server name.
+_server_tool_prefixes: dict = {}
+
+
+def _resolve_tool_prefix(config: dict) -> str:
+    """Resolve a server's leading tool-name prefix from its config.
+
+    Defaults to "mcp_" (unchanged behavior). ``tool_prefix`` is the full leading
+    string placed before the ``<server>_`` namespace, so "" drops the prefix
+    entirely. Sanitized to name-safe characters.
+    """
+    raw = (config or {}).get("tool_prefix", "mcp_")
+    if raw is None:
+        raw = ""
+    return sanitize_mcp_name_component(str(raw))
+
+
+def _tool_name_prefix(server_name: str) -> str:
+    """Leading prefix for a server's agent-facing tool names (default 'mcp_')."""
+    return _server_tool_prefixes.get(server_name, "mcp_")
+
+
 def _convert_mcp_schema(server_name: str, mcp_tool) -> dict:
     """Convert an MCP tool listing to the Hermes registry schema format.
 
@@ -3658,7 +3700,7 @@ def _convert_mcp_schema(server_name: str, mcp_tool) -> dict:
     """
     safe_tool_name = sanitize_mcp_name_component(mcp_tool.name)
     safe_server_name = sanitize_mcp_name_component(server_name)
-    prefixed_name = f"mcp_{safe_server_name}_{safe_tool_name}"
+    prefixed_name = f"{_tool_name_prefix(server_name)}{safe_server_name}_{safe_tool_name}"
     return {
         "name": prefixed_name,
         "description": mcp_tool.description or f"MCP tool {mcp_tool.name} from {server_name}",
@@ -3673,10 +3715,11 @@ def _build_utility_schemas(server_name: str) -> List[dict]:
     with keys: schema, handler_key.
     """
     safe_name = sanitize_mcp_name_component(server_name)
+    pfx = _tool_name_prefix(server_name)
     return [
         {
             "schema": {
-                "name": f"mcp_{safe_name}_list_resources",
+                "name": f"{pfx}{safe_name}_list_resources",
                 "description": f"List available resources from MCP server '{server_name}'",
                 "parameters": {
                     "type": "object",
@@ -3687,7 +3730,7 @@ def _build_utility_schemas(server_name: str) -> List[dict]:
         },
         {
             "schema": {
-                "name": f"mcp_{safe_name}_read_resource",
+                "name": f"{pfx}{safe_name}_read_resource",
                 "description": f"Read a resource by URI from MCP server '{server_name}'",
                 "parameters": {
                     "type": "object",
@@ -3704,7 +3747,7 @@ def _build_utility_schemas(server_name: str) -> List[dict]:
         },
         {
             "schema": {
-                "name": f"mcp_{safe_name}_list_prompts",
+                "name": f"{pfx}{safe_name}_list_prompts",
                 "description": f"List available prompts from MCP server '{server_name}'",
                 "parameters": {
                     "type": "object",
@@ -3715,7 +3758,7 @@ def _build_utility_schemas(server_name: str) -> List[dict]:
         },
         {
             "schema": {
-                "name": f"mcp_{safe_name}_get_prompt",
+                "name": f"{pfx}{safe_name}_get_prompt",
                 "description": f"Get a prompt by name from MCP server '{server_name}'",
                 "parameters": {
                     "type": "object",
@@ -3888,6 +3931,10 @@ def _register_server_tools(name: str, server: MCPServerTask, config: dict) -> Li
         List of registered prefixed tool names.
     """
     from tools.registry import registry
+
+    # Resolve this server's agent-facing tool-name prefix (default "mcp_") so the
+    # name builders below produce e.g. "urd_anchor" when tool_prefix is "".
+    _server_tool_prefixes[name] = _resolve_tool_prefix(config)
 
     registered_names: List[str] = []
     toolset_name = f"mcp-{name}"
@@ -4183,8 +4230,10 @@ def is_mcp_tool_parallel_safe(tool_name: str) -> bool:
 
     Returns False for non-MCP tools or tools from servers without the flag.
     """
-    if not tool_name.startswith("mcp_"):
-        return False
+    # Identify MCP tools by registration provenance, not by name prefix — a
+    # server may set a custom tool_prefix (e.g. urd → "urd_anchor"), so the
+    # historical "mcp_" prefix is not a reliable marker. Non-MCP tools are
+    # absent from the provenance map and fall through to False.
     with _lock:
         server_name = _mcp_tool_server_names.get(tool_name)
         return bool(server_name and server_name in _parallel_safe_servers)

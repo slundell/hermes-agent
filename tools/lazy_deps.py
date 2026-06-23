@@ -173,6 +173,17 @@ LAZY_DEPS: dict[str, tuple[str, ...]] = {
     # ─── Tools ─────────────────────────────────────────────────────────────
     # ACP adapter (VS Code / Zed / JetBrains integration)
     "tool.acp": ("agent-client-protocol==0.9.0",),
+    # MCP client SDK (external MCP servers declared in config `mcp_servers`).
+    # Mirrors pyproject `[mcp]`. Without this the top-of-module
+    # `from mcp import ...` guard in tools/mcp_tool.py silently fails and
+    # EVERY configured MCP server no-ops with zero tools — which is exactly
+    # what happened on the PVC-backed gateway venv (it never had the [mcp]
+    # extra). tools/mcp_tool.py calls ensure("tool.mcp") before its guard
+    # when mcp_servers is configured.
+    "tool.mcp": (
+        "mcp==1.26.0",
+        "starlette==1.0.1",  # CVE-2026-48710 (BadHost) — keep in sync with pyproject [mcp]
+    ),
     # Dashboard (`hermes dashboard`)
     "tool.dashboard": (
         "fastapi==0.133.1",

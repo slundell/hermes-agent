@@ -173,6 +173,42 @@ def test_skipped_compression_returns_messages_unchanged(tmp_path: Path) -> None:
     agent.context_compressor.compress.assert_not_called()
 
 
+def test_leaf_noop_compression_does_not_rotate_session(tmp_path: Path) -> None:
+    """An LCM leaf no-op (compress returns the input unchanged, not aborted)
+    must NOT rotate the session_id.
+
+    When the raw backlog outside the fresh tail is below the leaf-chunk
+    threshold the context engine compacts nothing and returns the input
+    messages. Rotating anyway (new session_id + rebuilt system prompt +
+    on_session_start) makes the engine RE-DERIVE the prefix, which is not
+    byte-identical past the system+tools front — so the warm std/MTP KV cache
+    is evicted and the slot cold-prefills the whole compacted body (~70k) every
+    turn above threshold. The no-op must be a true no-op: messages verbatim,
+    session_id unchanged, no child session.
+    """
+    db = SessionDB(db_path=tmp_path / "state.db")
+    parent_sid = "LEAF_NOOP_TEST"
+    db.create_session(parent_sid, source="discord")
+
+    agent = _build_agent_with_db(db, parent_sid)
+    messages = [{"role": "user", "content": f"m{i}"} for i in range(20)]
+
+    # LCM leaf no-op: compress() returns the input unchanged (same length),
+    # NOT aborted, no summary error — nothing to compact.
+    agent.context_compressor.compress.side_effect = lambda *_a, **_k: list(messages)
+
+    compressed, _sp = agent._compress_context(messages, "sys", approx_tokens=120_000)
+
+    assert len(compressed) == len(messages)
+    assert agent.session_id == parent_sid, (
+        "Leaf no-op rotated the session_id — this re-derives the prefix and "
+        "evicts the warm KV cache every turn above threshold."
+    )
+    assert _count_children(db, parent_sid) == 0, (
+        "Leaf no-op created a child session — a no-op must not rotate."
+    )
+
+
 class _NoLockSubsystemDB:
     """Wraps a real SessionDB but simulates a pre-#34351 version skew.
 

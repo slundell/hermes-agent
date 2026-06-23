@@ -910,6 +910,10 @@ def run_conversation(
         max_retries = agent._api_max_retries
         _retry = TurnRetryState()
         max_compression_attempts = 3
+        # wpu (P10): assistant-prefill recovery flag. Upstream's other retry
+        # flags live in TurnRetryState (_retry.*) as of v2026.6.19; this one is
+        # ours, kept as a local that the recovery handler below checks/sets.
+        assistant_prefill_retry_attempted = False
 
         finish_reason = "stop"
         response = None  # Guard against UnboundLocalError if all retries fail
@@ -2312,6 +2316,38 @@ def run_conversation(
                         logger.info(
                             "multimodal-tool-content recovery: no list-type tool "
                             "messages with image parts found; surfacing original error."
+                        )
+
+                # Assistant-prefill recovery: thinking-template providers
+                # (llama.cpp Qwen3.x with enable_thinking) cannot continue a
+                # partial assistant message. A payload can end on one after a
+                # mid-turn forced-overflow compaction rebuilds the history
+                # around an in-flight response (observed 2026-06-12: HTTP 500
+                # "Assistant response prefill is incompatible with
+                # enable_thinking" ×3 → dead turn). Strip the trailing
+                # assistant message — from the canonical history too, when it
+                # shares the same tail — and retry once; the model regenerates
+                # the partial from the compacted context.
+                if (
+                    classified.reason == FailoverReason.assistant_prefill_unsupported
+                    and not assistant_prefill_retry_attempted
+                ):
+                    assistant_prefill_retry_attempted = True
+                    _prefill_tail = api_messages[-1] if api_messages else None
+                    if agent._try_strip_trailing_assistant_prefill(api_messages):
+                        if messages and messages[-1] is _prefill_tail:
+                            messages.pop()
+                        agent._vprint(
+                            f"{agent.log_prefix}📐 Provider can't continue a partial "
+                            f"assistant response (enable_thinking) — dropped the "
+                            f"partial and retrying as a fresh generation...",
+                            force=True,
+                        )
+                        continue
+                    else:
+                        logger.info(
+                            "assistant-prefill recovery: payload does not end on a "
+                            "strippable assistant message; surfacing original error."
                         )
 
                 # Anthropic OAuth subscription rejected the 1M-context beta

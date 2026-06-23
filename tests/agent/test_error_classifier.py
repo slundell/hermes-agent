@@ -58,6 +58,7 @@ class TestFailoverReason:
             "model_not_found", "format_error",
             "invalid_encrypted_content",
             "multimodal_tool_content_unsupported",
+            "assistant_prefill_unsupported",
             "provider_policy_blocked",
             "content_policy_blocked",
             "thinking_signature", "long_context_tier",
@@ -404,6 +405,75 @@ class TestClassifyApiError:
         result = classify_api_error(e)
         assert result.reason == FailoverReason.server_error
         assert result.retryable is True
+
+    # ── 5xx that are actually context overflows ──
+    # llama.cpp's OAI server returns context overflow as HTTP 500 with
+    # type=server_error: {'error': {'code': 500, 'message': 'the request
+    # exceeds the available context size, try increasing it', 'type':
+    # 'server_error'}}. The error is deterministic — retrying the identical
+    # payload burns max_retries and fails the turn. It must classify as
+    # context_overflow with should_compress=True so the compress-and-restart
+    # recovery path fires instead.
+
+    def test_500_llamacpp_context_size_is_context_overflow(self):
+        e = MockAPIError(
+            "the request exceeds the available context size, try increasing it",
+            status_code=500,
+            body={
+                "error": {
+                    "code": 500,
+                    "message": (
+                        "the request exceeds the available context size, "
+                        "try increasing it"
+                    ),
+                    "type": "server_error",
+                }
+            },
+        )
+        result = classify_api_error(e)
+        assert result.reason == FailoverReason.context_overflow
+        assert result.should_compress is True
+
+    def test_502_context_window_message_is_context_overflow(self):
+        """Same overflow text behind a proxy that rewrites 500 → 502."""
+        e = MockAPIError(
+            "prompt is too long: 140000 tokens > 131072 maximum",
+            status_code=502,
+        )
+        result = classify_api_error(e)
+        assert result.reason == FailoverReason.context_overflow
+        assert result.should_compress is True
+
+    def test_500_context_shift_disabled_is_context_overflow(self):
+        """llama.cpp with --no-context-shift refuses to generate when the
+        slot is full: "context shift is disabled". Deterministic ceiling
+        error (observed 2026-06-12 11:20 at 130,997/131,072 tokens, retried
+        3x verbatim, turn died) — must route to compression recovery."""
+        e = MockAPIError("context shift is disabled", status_code=500)
+        result = classify_api_error(e)
+        assert result.reason == FailoverReason.context_overflow
+        assert result.should_compress is True
+
+    def test_context_shift_disabled_without_status_is_context_overflow(self):
+        """The same error surfaces mid-stream as a plain APIError with no
+        status code — message-pattern matching must still catch it."""
+        e = MockAPIError("context shift is disabled")
+        result = classify_api_error(e)
+        assert result.reason == FailoverReason.context_overflow
+        assert result.should_compress is True
+
+    def test_kv_size_rejection_is_context_overflow(self):
+        """Third llama.cpp ceiling-error variant (observed 2026-06-12 16:52):
+        'Input prompt is too big compared to KV size. Please try increasing
+        KV size.' — surfaced as a plain APIError before delivery. Must route
+        to compression recovery, not the verbatim-retry path."""
+        e = MockAPIError(
+            "Input prompt is too big compared to KV size. "
+            "Please try increasing KV size."
+        )
+        result = classify_api_error(e)
+        assert result.reason == FailoverReason.context_overflow
+        assert result.should_compress is True
 
     # ── Model not found ──
 
