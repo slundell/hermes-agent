@@ -187,3 +187,19 @@ Ledger of what our fork carries on top of upstream `NousResearch/hermes-agent`, 
 - **D2** `edf758c1e` fix(stream): #42314 truncation — **DROP-up** (upstreamed)
 - **D3** `4ff1f504c` LCM: squash-merge vendored PR #6464 — **DROP-x** (we use the plugin; cancels with `1952ddb0a`)
 - **D4** `f73436bc9` auxiliary max_tokens floor + `c74f2adef` its Revert — **DROP-x** (cancel pair)
+
+---
+
+## Sync progress (2026-06-23) — `sync/v2026.6.19` (worktree `/wpu/src/hermes-sync`)
+
+Live `wpu-lcm-plugin` untouched (pod-safe); sync done in a worktree, will ff `wpu-lcm-plugin` only when green.
+
+**Applied CLEAN (9):** P14 document_read, P24 lazy_deps PEP668, P7 bg-review budget *(trim flash-routing line)*,
+P20+P21 skill_manager, P22+P23 gateway always_preload, P12 agent XML-scrub, P15 multimodal_analyze.
+
+**Remaining — conflict resolution (hot files):**
+- `hermes_cli/kanban_db.py` — P18 (`d02c7e000`), P19 (`5c9eea3e6`)
+- `agent/background_review.py` — P3 (`78d53c167`), P4 (`30165d1c6`), P6 (`272cd9b73`) + snapshot (`2817e3a48`); interdependent, resolve in order
+- `agent/conversation_loop.py`, `conversation_compression.py` (P2), `error_classifier.py` (P9), `mcp_tool.py`+`lazy_deps.py` (P13), `conversation_loop.py` (P10) — from snapshot `2817e3a48` (when re-applying the snapshot, DROP its dead files: review_replay_draft.py / holo pruner / oai-wrapper / package-lock.json)
+
+**Then:** (1) **P1 empirical** — deploy v2026.6.19 + hermes-lcm plugin + `engine: lcm`, confirm LCM loads with ZERO agent_init edits; (2) drop the moot flash-routing line in P7; (3) update the bg-review headroom guard 131072→262144; (4) **test** (LCM, bg-review, MCP); (5) ff `wpu-lcm-plugin` → `sync/v2026.6.19` and rollout.
